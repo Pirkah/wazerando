@@ -2,7 +2,7 @@ import React, { useRef } from 'react';
 import { Trail, MapTileLayer, SpotCategory } from '../../types';
 import { formatDistance, formatElevation, formatDuration } from '../../utils/geoUtils';
 import { parseGpxContent } from '../../services/gpxParser';
-import { Layers, Upload, Compass, Mountain, TrendingUp, X, Filter, Check } from 'lucide-react';
+import { Layers, Upload, Compass, Mountain, TrendingUp, X, Filter, Check, Navigation } from 'lucide-react';
 
 interface TrailSelectorProps {
   isOpen: boolean;
@@ -10,6 +10,7 @@ interface TrailSelectorProps {
   trails: Trail[];
   selectedTrailId: string;
   onSelectTrail: (trailId: string) => void;
+  onStartTrail?: (trail: Trail) => void;
   onImportGpx: (newTrail: Trail) => void;
   activeLayer: MapTileLayer;
   onChangeLayer: (layer: MapTileLayer) => void;
@@ -42,6 +43,7 @@ export const TrailSelector: React.FC<TrailSelectorProps> = ({
   trails,
   selectedTrailId,
   onSelectTrail,
+  onStartTrail,
   onImportGpx,
   activeLayer,
   onChangeLayer,
@@ -206,6 +208,23 @@ export const TrailSelector: React.FC<TrailSelectorProps> = ({
                           {formatDuration(t.estimatedDuration)}
                         </span>
                       </div>
+
+                      {/* Bouton Lancement Direct Waze */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onStartTrail) {
+                            onStartTrail(t);
+                          } else {
+                            onSelectTrail(t.id);
+                          }
+                          onClose();
+                        }}
+                        className="mt-3 w-full py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-sky-600 hover:from-emerald-500 hover:to-sky-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md transition-all active:scale-95"
+                      >
+                        <Navigation className="w-3.5 h-3.5 fill-current" />
+                        <span>DÉMARRER LA RANDO (GO)</span>
+                      </button>
                     </div>
                   </div>
                 );

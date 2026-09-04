@@ -1,5 +1,24 @@
-import { ElevationPoint } from '../types';
-import { calculateDistance } from '../utils/geoUtils';
+import { ElevationPoint, Trail } from '../types';
+import { calculateDistance, calculateBearing } from '../utils/geoUtils';
+
+export interface NavigationStep {
+  instruction: string;
+  distance: number;
+  bearing: number;
+  pointIndex?: number;
+  lat?: number;
+  lng?: number;
+  maneuverType?:
+    | 'start'
+    | 'straight'
+    | 'slight_right'
+    | 'right'
+    | 'sharp_right'
+    | 'slight_left'
+    | 'left'
+    | 'sharp_left'
+    | 'arrive';
+}
 
 export interface NavigationRoute {
   distance: number; // en mètres
@@ -10,7 +29,7 @@ export interface NavigationRoute {
   maxElevation: number;
   minElevation: number;
   destinationTitle: string;
-  steps: { instruction: string; distance: number; bearing: number }[];
+  steps: NavigationStep[];
 }
 
 /**
@@ -220,7 +239,129 @@ function generateDirectHikingRoute(
         instruction: `Suivre le sentier vers ${destTitle}`,
         distance: Math.round(cumDist),
         bearing: 0,
+        maneuverType: 'start',
       },
     ],
+  };
+}
+
+/**
+ * Convertit un parcours de randonnée (Trail) en véritable itinéraire de navigation Waze avec guidage pas-à-pas
+ */
+export function createNavigationRouteFromTrail(trail: Trail): NavigationRoute {
+  const points = trail.points;
+  if (!points || points.length === 0) {
+    return {
+      distance: trail.totalDistance || 1000,
+      duration: (trail.estimatedDuration || 30) * 60,
+      points: [],
+      elevationGain: trail.elevationGain || 50,
+      elevationLoss: trail.elevationLoss || 50,
+      maxElevation: trail.maxElevation || 300,
+      minElevation: trail.minElevation || 200,
+      destinationTitle: trail.name,
+      steps: [
+        {
+          instruction: `Suivre le tracé de ${trail.name}`,
+          distance: trail.totalDistance,
+          bearing: 0,
+          maneuverType: 'start',
+        },
+      ],
+    };
+  }
+
+  const steps: NavigationStep[] = [];
+  const firstPt = points[0];
+  const secondPt = points.length > 1 ? points[1] : firstPt;
+  const initialBearing = calculateBearing(firstPt.lat, firstPt.lng, secondPt.lat, secondPt.lng);
+
+  // Étape 1 : départ
+  steps.push({
+    instruction: `Départ : S'engager sur ${trail.name}`,
+    distance: 0,
+    bearing: Math.round(initialBearing),
+    pointIndex: 0,
+    lat: firstPt.lat,
+    lng: firstPt.lng,
+    maneuverType: 'start',
+  });
+
+  // Détection des virages et changements de cap
+  let lastStepDist = 0;
+  for (let i = 2; i < points.length - 2; i += 2) {
+    const prev = points[i - 2];
+    const curr = points[i];
+    const next = points[i + 2];
+
+    const distFromStart = curr.distanceFromStart;
+    if (distFromStart - lastStepDist < 50) continue;
+
+    const bearing1 = calculateBearing(prev.lat, prev.lng, curr.lat, curr.lng);
+    const bearing2 = calculateBearing(curr.lat, curr.lng, next.lat, next.lng);
+
+    let angleDiff = bearing2 - bearing1;
+    while (angleDiff < -180) angleDiff += 360;
+    while (angleDiff > 180) angleDiff -= 360;
+
+    let maneuverType: NavigationStep['maneuverType'] = 'straight';
+    let instruction = '';
+
+    if (angleDiff > 65) {
+      maneuverType = 'sharp_right';
+      instruction = 'Virage serré à droite sur le sentier';
+    } else if (angleDiff > 28) {
+      maneuverType = 'right';
+      instruction = 'Tourner à droite sur le chemin';
+    } else if (angleDiff > 15) {
+      maneuverType = 'slight_right';
+      instruction = 'Prendre légèrement à droite';
+    } else if (angleDiff < -65) {
+      maneuverType = 'sharp_left';
+      instruction = 'Virage serré à gauche sur le sentier';
+    } else if (angleDiff < -28) {
+      maneuverType = 'left';
+      instruction = 'Tourner à gauche sur le chemin';
+    } else if (angleDiff < -15) {
+      maneuverType = 'slight_left';
+      instruction = 'Prendre légèrement à gauche';
+    }
+
+    if (maneuverType !== 'straight') {
+      steps.push({
+        instruction,
+        distance: distFromStart,
+        bearing: Math.round(bearing2),
+        pointIndex: i,
+        lat: curr.lat,
+        lng: curr.lng,
+        maneuverType,
+      });
+      lastStepDist = distFromStart;
+    }
+  }
+
+  // Dernière étape : Arrivée
+  const lastPt = points[points.length - 1];
+  steps.push({
+    instruction: `Arrivée à destination : ${trail.name}`,
+    distance: trail.totalDistance,
+    bearing: 0,
+    pointIndex: points.length - 1,
+    lat: lastPt.lat,
+    lng: lastPt.lng,
+    maneuverType: 'arrive',
+  });
+
+  return {
+    distance: trail.totalDistance,
+    duration: trail.estimatedDuration * 60,
+    points,
+    elevationGain: trail.elevationGain,
+    elevationLoss: trail.elevationLoss,
+    maxElevation: trail.maxElevation,
+    minElevation: trail.minElevation,
+    destinationTitle: trail.name,
+    steps,
   };
 }

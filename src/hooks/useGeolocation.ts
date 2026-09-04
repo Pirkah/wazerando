@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { calculateBearing } from '../utils/geoUtils';
 
 export interface UserLocation {
   lat: number;
@@ -30,10 +31,12 @@ export function useGeolocation() {
 
   const [isFollowing, setIsFollowing] = useState<boolean>(true); // Suivi caméra Waze
   const [isSimulating, setIsSimulating] = useState<boolean>(false); // Simulation de marche
+  const [simulationRoute, setSimulationRoute] = useState<{ lat: number; lng: number; elevation?: number }[] | null>(null);
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
 
   const watchIdRef = useRef<number | null>(null);
   const simIntervalRef = useRef<any>(null);
+  const simRouteIndexRef = useRef<number>(0);
   const lastLocationRef = useRef<UserLocation>(location);
 
   // 1. Récupération instantanée par IP (place l'utilisateur directement à Limoges/Nouvelle-Aquitaine)
@@ -185,41 +188,73 @@ export function useGeolocation() {
     );
   }, []);
 
-  // 3. Mode Simulation de Randonnée (Marche active à 4.8 km/h avec direction et dénivelé)
+  // 3. Mode Simulation de Randonnée (Marche active le long d'un tracé ou sur sentier sinueux)
   const toggleSimulation = useCallback(() => {
     setIsSimulating((prev) => !prev);
   }, []);
 
+  const resetSimulationProgress = useCallback((index = 0) => {
+    simRouteIndexRef.current = index;
+  }, []);
+
   useEffect(() => {
     if (isSimulating) {
-      // Déplacement pas à pas réaliste (avance d'environ 5 mètres chaque seconde = 4.8 km/h)
-      let stepAngle = lastLocationRef.current.heading || 45;
-      simIntervalRef.current = setInterval(() => {
-        setLocation((current) => {
-          // Légère variation de direction pour simuler un sentier sinueux
-          stepAngle = (stepAngle + (Math.random() - 0.5) * 15 + 360) % 360;
-          const rad = (stepAngle * Math.PI) / 180;
-          const distDeltaDeg = 0.000045; // ~5 mètres
+      // Cas A : Suivre pas à pas le tracé officiel de la randonnée active
+      if (simulationRoute && simulationRoute.length > 1) {
+        simIntervalRef.current = setInterval(() => {
+          let nextIdx = simRouteIndexRef.current + 1;
+          if (nextIdx >= simulationRoute.length) {
+            nextIdx = 0; // Boucle
+          }
+          simRouteIndexRef.current = nextIdx;
 
-          const nextLat = current.lat + Math.cos(rad) * distDeltaDeg;
-          const nextLng = current.lng + Math.sin(rad) * distDeltaDeg * 1.4;
-          const nextAlt = current.altitude + (Math.random() - 0.45) * 2;
+          const currPt = simulationRoute[nextIdx];
+          const forwardPt = simulationRoute[Math.min(nextIdx + 1, simulationRoute.length - 1)];
+          const stepAngle = calculateBearing(currPt.lat, currPt.lng, forwardPt.lat, forwardPt.lng);
 
           const updated: UserLocation = {
-            lat: nextLat,
-            lng: nextLng,
-            altitude: Math.round(nextAlt),
+            lat: currPt.lat,
+            lng: currPt.lng,
+            altitude: Math.round(currPt.elevation || 240),
             accuracy: 5,
-            speed: 4.8, // 4.8 km/h en marche
+            speed: 4.8, // 4.8 km/h vitesse de marche
             heading: Math.round(stepAngle),
             timestamp: Date.now(),
             source: 'simulated',
-            label: 'Simulation de marche (4.8 km/h)',
+            label: 'Navigation en direct (Simulation 4.8 km/h)',
           };
           lastLocationRef.current = updated;
-          return updated;
-        });
-      }, 1000);
+          setLocation(updated);
+        }, 1000);
+      } else {
+        // Cas B : Simulation libre (sentier sinueux)
+        let stepAngle = lastLocationRef.current.heading || 45;
+        simIntervalRef.current = setInterval(() => {
+          setLocation((current) => {
+            stepAngle = (stepAngle + (Math.random() - 0.5) * 15 + 360) % 360;
+            const rad = (stepAngle * Math.PI) / 180;
+            const distDeltaDeg = 0.000045; // ~5 mètres
+
+            const nextLat = current.lat + Math.cos(rad) * distDeltaDeg;
+            const nextLng = current.lng + Math.sin(rad) * distDeltaDeg * 1.4;
+            const nextAlt = current.altitude + (Math.random() - 0.45) * 2;
+
+            const updated: UserLocation = {
+              lat: nextLat,
+              lng: nextLng,
+              altitude: Math.round(nextAlt),
+              accuracy: 5,
+              speed: 4.8,
+              heading: Math.round(stepAngle),
+              timestamp: Date.now(),
+              source: 'simulated',
+              label: 'Simulation de marche (4.8 km/h)',
+            };
+            lastLocationRef.current = updated;
+            return updated;
+          });
+        }, 1000);
+      }
     } else {
       if (simIntervalRef.current) clearInterval(simIntervalRef.current);
     }
@@ -227,10 +262,10 @@ export function useGeolocation() {
     return () => {
       if (simIntervalRef.current) clearInterval(simIntervalRef.current);
     };
-  }, [isSimulating]);
+  }, [isSimulating, simulationRoute]);
 
-  // 4. Définition manuelle de la position (Clic sur la carte)
-  const setManualPosition = useCallback((lat: number, lng: number, label: string = 'Position choisie') => {
+  // 4. Définition manuelle de la position (Clic sur la carte ou départ rando)
+  const setManualPosition = useCallback((lat: number, lng: number, label: string = 'Position choisie', heading?: number) => {
     setIsSimulating(false);
     setLocation((prev) => {
       const updated: UserLocation = {
@@ -238,6 +273,7 @@ export function useGeolocation() {
         lat,
         lng,
         speed: 0,
+        heading: heading !== undefined ? heading : prev.heading,
         source: 'manual',
         label,
         timestamp: Date.now(),
@@ -264,6 +300,8 @@ export function useGeolocation() {
     toggleSimulation,
     setManualPosition,
     startGpsTracking,
+    setSimulationRoute,
+    resetSimulationProgress,
     errorNotice,
   };
 }

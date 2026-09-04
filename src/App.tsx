@@ -2,11 +2,13 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Trail, CommunitySpot, MapTileLayer, SpotCategory, ElevationPoint, UserAvatarId } from './types';
 import { MOCK_TRAILS, INITIAL_COMMUNITY_SPOTS } from './data/mockTrails';
 import { useGeolocation } from './hooks/useGeolocation';
-import { calculatePedestrianRoute, NavigationRoute } from './services/routingService';
+import { calculatePedestrianRoute, createNavigationRouteFromTrail, NavigationRoute } from './services/routingService';
+import { calculateBearing, calculateDistance } from './utils/geoUtils';
 import { TrailMap } from './components/Map/TrailMap';
 import { ElevationProfile } from './components/Elevation/ElevationProfile';
 import { GuidanceHUD } from './components/WazeHUD/GuidanceHUD';
 import { WazeSpeedometer } from './components/WazeHUD/WazeSpeedometer';
+import { TrailLaunchCard } from './components/Navigation/TrailLaunchCard';
 import { ReportModal } from './components/Modals/ReportModal';
 import { SpotDetailsModal } from './components/Modals/SpotDetailsModal';
 import { TrailSelector } from './components/Sidebar/TrailSelector';
@@ -44,6 +46,8 @@ export const App: React.FC = () => {
     toggleSimulation,
     setManualPosition,
     startGpsTracking,
+    setSimulationRoute,
+    resetSimulationProgress,
   } = useGeolocation();
 
   const [isClickToMoveMode, setIsClickToMoveMode] = useState<boolean>(false);
@@ -82,9 +86,41 @@ export const App: React.FC = () => {
     return spots.filter((s) => selectedCategories.includes(s.category));
   }, [spots, selectedCategories]);
 
-  // 5. Navigation & Calcul d'Itinéraire Waze
+  // 5. Navigation & Guidage Waze (Démarrer la rando / Navigation vers un spot)
   const [activeRoute, setActiveRoute] = useState<NavigationRoute | null>(null);
   const [isRoutingLoading, setIsRoutingLoading] = useState<boolean>(false);
+
+  // Lancement officiel d'une randonnée (Bouton Démarrer la rando GO)
+  const handleStartTrailNavigation = (trailToStart: Trail) => {
+    setSelectedTrailId(trailToStart.id);
+    const navRoute = createNavigationRouteFromTrail(trailToStart);
+    setActiveRoute(navRoute);
+
+    // Si le randonneur est distant du point de départ (> 120m), on le cale directement au départ
+    if (trailToStart.points.length > 0) {
+      const startPt = trailToStart.points[0];
+      const secondPt = trailToStart.points.length > 1 ? trailToStart.points[1] : startPt;
+      const distToStart = calculateDistance(userLocation.lat, userLocation.lng, startPt.lat, startPt.lng);
+      const initialBearing = calculateBearing(startPt.lat, startPt.lng, secondPt.lat, secondPt.lng);
+
+      if (distToStart > 120) {
+        setManualPosition(
+          startPt.lat,
+          startPt.lng,
+          `Départ : ${trailToStart.name}`,
+          Math.round(initialBearing)
+        );
+      }
+    }
+
+    // Connecter le parcours à la simulation de marche
+    setSimulationRoute(trailToStart.points);
+    resetSimulationProgress(0);
+
+    // Activer le mode suivi cockpit immédiat (zoom 19.2)
+    setIsFollowing(true);
+    setRecenterCount((c) => c + 1);
+  };
 
   const handleStartNavigationToSpot = async (spot: CommunitySpot) => {
     if (!userLocation) return;
@@ -100,7 +136,10 @@ export const App: React.FC = () => {
         spot.elevation
       );
       setActiveRoute(route);
+      setSimulationRoute(route.points);
+      resetSimulationProgress(0);
       setIsFollowing(true);
+      setRecenterCount((c) => c + 1);
     } catch (err) {
       console.error('Erreur de calcul d\'itinéraire:', err);
     } finally {
@@ -110,6 +149,7 @@ export const App: React.FC = () => {
 
   const handleStopNavigation = () => {
     setActiveRoute(null);
+    setSimulationRoute(null);
   };
 
   // 6. Profil Altimétrique Actif
@@ -424,7 +464,17 @@ export const App: React.FC = () => {
         )}
       </div>
 
-      {/* 4. Profil Altimétrique Dynamique & Dénivelé */}
+      {/* 4. Carte Flottante de Lancement Waze (DÉMARRER LA RANDO GO) */}
+      {!activeRoute && activeTrail && (
+        <TrailLaunchCard
+          trail={activeTrail}
+          userPosition={userLocation}
+          onStartNavigation={handleStartTrailNavigation}
+          onOpenTrailMenu={() => setIsMenuOpen(true)}
+        />
+      )}
+
+      {/* 5. Profil Altimétrique Dynamique & Dénivelé */}
       <ElevationProfile
         trail={activeElevationTrail}
         spots={filteredSpots}
@@ -433,7 +483,7 @@ export const App: React.FC = () => {
         onSelectSpot={(spot) => setSelectedSpot(spot)}
       />
 
-      {/* 5. Modale de Signalement Waze */}
+      {/* 6. Modale de Signalement Waze */}
       <ReportModal
         isOpen={isReportModalOpen}
         onClose={() => setIsReportModalOpen(false)}
@@ -443,7 +493,7 @@ export const App: React.FC = () => {
         currentElevation={userLocation.altitude}
       />
 
-      {/* 6. Modale de Détails d'un Spot */}
+      {/* 7. Modale de Détails d'un Spot */}
       <SpotDetailsModal
         spot={selectedSpot}
         onClose={() => setSelectedSpot(null)}
@@ -453,7 +503,7 @@ export const App: React.FC = () => {
         userPosition={userLocation}
       />
 
-      {/* 7. Volet Latéral Sélecteur de Rando & Calques */}
+      {/* 8. Volet Latéral Sélecteur de Rando & Calques */}
       <TrailSelector
         isOpen={isMenuOpen}
         onClose={() => setIsMenuOpen(false)}
@@ -463,6 +513,7 @@ export const App: React.FC = () => {
           setSelectedTrailId(id);
           setActiveRoute(null);
         }}
+        onStartTrail={handleStartTrailNavigation}
         onImportGpx={handleImportGpx}
         activeLayer={activeLayer}
         onChangeLayer={setActiveLayer}
@@ -472,7 +523,7 @@ export const App: React.FC = () => {
         onOpenAccount={() => setIsAccountOpen(true)}
       />
 
-      {/* 8. Studio PC de Préparation de Randonnée */}
+      {/* 9. Studio PC de Préparation de Randonnée */}
       <TrailPlannerModal
         isOpen={isStudioOpen}
         onClose={() => setIsStudioOpen(false)}
@@ -480,7 +531,7 @@ export const App: React.FC = () => {
         userCoords={userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : null}
       />
 
-      {/* 9. Modale Compte Utilisateur & Sync Cloud */}
+      {/* 10. Modale Compte Utilisateur & Sync Cloud */}
       <UserAccountModal
         isOpen={isAccountOpen}
         onClose={() => setIsAccountOpen(false)}
@@ -489,6 +540,7 @@ export const App: React.FC = () => {
           setSelectedTrailId(trailId);
           setActiveRoute(null);
         }}
+        onStartTrail={handleStartTrailNavigation}
         onDeleteSavedTrail={handleDeleteSavedTrail}
         userAvatar={userAvatar}
         onOpenAvatarSelector={() => setIsAvatarModalOpen(true)}

@@ -3,6 +3,7 @@ import L from 'leaflet';
 import { Trail, CommunitySpot, MapTileLayer, ElevationPoint, UserAvatarId } from '../../types';
 import { NavigationRoute } from '../../services/routingService';
 import { generateUserMarkerHtml, USER_AVATARS } from '../../data/avatarConfig';
+import { calculateBearing, calculateDistance } from '../../utils/geoUtils';
 
 interface TrailMapProps {
   trail: Trail | null;
@@ -22,27 +23,31 @@ interface TrailMapProps {
 }
 
 // 100% Tuiles Gratuites et Publiques - Aucune clé API requise
-const TILE_PROVIDERS: Record<MapTileLayer, { url: string; attribution: string; maxZoom: number; subdomains?: string }> = {
+const TILE_PROVIDERS: Record<MapTileLayer, { url: string; attribution: string; maxZoom: number; maxNativeZoom?: number; subdomains?: string }> = {
   outdoors: {
     url: 'https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png',
     attribution: '&copy; OpenStreetMap France | Données &copy; OpenStreetMap',
     maxZoom: 20,
+    maxNativeZoom: 20,
     subdomains: 'abc',
   },
   standard: {
     url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    maxZoom: 19,
+    maxZoom: 20,
+    maxNativeZoom: 19,
   },
   satellite: {
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, IGN',
-    maxZoom: 18,
+    maxZoom: 20,
+    maxNativeZoom: 18,
   },
   opentopo: {
     url: 'https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png',
     attribution: '&copy; CyclOSM &copy; OpenStreetMap',
-    maxZoom: 18,
+    maxZoom: 20,
+    maxNativeZoom: 18,
     subdomains: 'abc',
   },
 };
@@ -58,13 +63,15 @@ const CATEGORY_COLORS: Record<string, { bg: string; border: string; emoji: strin
 };
 
 // Fonction de centrage décalé "Cockpit Waze" (place le randonneur dans le tiers inférieur de l'écran)
-function centerCockpitWaze(map: L.Map, lat: number, lng: number, zoomLevel = 18.5, animate = false) {
+// Fonction de centrage décalé "Cockpit Waze" (place le randonneur dans le tiers inférieur de l'écran)
+export function centerCockpitWaze(map: L.Map, lat: number, lng: number, zoomLevel = 19.2, animate = false) {
   if (!map) return;
   try {
     const size = map.getSize();
-    const containerHeight = (size && size.y > 0) ? size.y : 600;
+    const containerHeight = size && size.y > 0 ? size.y : 600;
     const targetPoint = map.project([lat, lng], zoomLevel);
-    const shiftedPoint = L.point(targetPoint.x, targetPoint.y - containerHeight * 0.22);
+    // Décalage vertical de 26% : l'utilisateur se trouve dans le quart inférieur pour voir la route devant lui
+    const shiftedPoint = L.point(targetPoint.x, targetPoint.y - containerHeight * 0.26);
     const shiftedLatLng = map.unproject(shiftedPoint, zoomLevel);
     map.setView(shiftedLatLng, zoomLevel, { animate });
   } catch (err) {
@@ -98,6 +105,7 @@ export const TrailMap: React.FC<TrailMapProps> = ({
   const polylineOutlineRef = useRef<L.Polyline | null>(null);
   const routePolylineRef = useRef<L.Polyline | null>(null);
   const routeOutlineRef = useRef<L.Polyline | null>(null);
+  const routeChevronsRef = useRef<L.LayerGroup | null>(null);
   const spotMarkersLayerRef = useRef<L.LayerGroup | null>(null);
   const userMarkerRef = useRef<L.Marker | null>(null);
   const accuracyCircleRef = useRef<L.Circle | null>(null);
@@ -111,12 +119,12 @@ export const TrailMap: React.FC<TrailMapProps> = ({
     const initialLat = userPosition?.lat || 45.8285;
     const initialLng = userPosition?.lng || 1.2672;
 
-    // Zoom initial 18.5 ultra-rapproché "comme en voiture"
+    // Zoom initial ultra-rapproché "comme en voiture"
     const map = L.map(mapContainerRef.current, {
       center: [initialLat, initialLng],
-      zoom: 18.5,
+      zoom: 19.2,
       zoomControl: false,
-      maxZoom: 19,
+      maxZoom: 20,
     });
 
     L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -125,18 +133,20 @@ export const TrailMap: React.FC<TrailMapProps> = ({
     const tileLayer = L.tileLayer(initialProvider.url, {
       attribution: initialProvider.attribution,
       maxZoom: initialProvider.maxZoom,
+      maxNativeZoom: initialProvider.maxNativeZoom,
       subdomains: initialProvider.subdomains || 'abc',
     }).addTo(map);
 
     tileLayerRef.current = tileLayer;
     spotMarkersLayerRef.current = L.layerGroup().addTo(map);
     startEndMarkersRef.current = L.layerGroup().addTo(map);
+    routeChevronsRef.current = L.layerGroup().addTo(map);
     mapInstanceRef.current = map;
 
     // Centrage cockpit initial décalé une fois la carte prête
     map.whenReady(() => {
       setTimeout(() => {
-        centerCockpitWaze(map, initialLat, initialLng, 18.5, false);
+        centerCockpitWaze(map, initialLat, initialLng, 19.2, false);
       }, 100);
     });
 
@@ -166,6 +176,10 @@ export const TrailMap: React.FC<TrailMapProps> = ({
       if (hoveredMarkerRef.current) {
         try { map.removeLayer(hoveredMarkerRef.current); } catch (_) {}
         hoveredMarkerRef.current = null;
+      }
+      if (routeChevronsRef.current) {
+        try { map.removeLayer(routeChevronsRef.current); } catch (_) {}
+        routeChevronsRef.current = null;
       }
       map.remove();
       mapInstanceRef.current = null;
@@ -260,28 +274,69 @@ export const TrailMap: React.FC<TrailMapProps> = ({
 
     if (routePolylineRef.current) map.removeLayer(routePolylineRef.current);
     if (routeOutlineRef.current) map.removeLayer(routeOutlineRef.current);
+    if (routeChevronsRef.current) routeChevronsRef.current.clearLayers();
 
     if (activeRoute && activeRoute.points.length > 0) {
       const latLngs = activeRoute.points.map((p) => [p.lat, p.lng] as [number, number]);
 
+      // Contour sombre très contrasté
       routeOutlineRef.current = L.polyline(latLngs, {
-        color: '#0f172a',
-        weight: 10,
-        opacity: 0.8,
+        color: '#021827',
+        weight: 14,
+        opacity: 0.95,
         lineCap: 'round',
         lineJoin: 'round',
       }).addTo(map);
 
+      // Tracé Cyan Waze éclatant
       routePolylineRef.current = L.polyline(latLngs, {
-        color: '#0284c7',
-        weight: 6,
+        color: '#00f0ff',
+        weight: 8,
         opacity: 1,
         lineCap: 'round',
         lineJoin: 'round',
       }).addTo(map);
 
-      // Vue rapprochée Waze sur le point de départ de navigation
-      map.setView(latLngs[0], 17.5, { animate: true });
+      // Chevrons directionnels Waze le long du tracé
+      if (routeChevronsRef.current) {
+        let accumulatedMeters = 0;
+        for (let i = 0; i < activeRoute.points.length - 1; i++) {
+          const p1 = activeRoute.points[i];
+          const p2 = activeRoute.points[i + 1];
+          const d = calculateDistance(p1.lat, p1.lng, p2.lat, p2.lng);
+          accumulatedMeters += d;
+
+          // Poser un chevron tous les ~35 mètres
+          if (accumulatedMeters >= 35) {
+            accumulatedMeters = 0;
+            const bearing = calculateBearing(p1.lat, p1.lng, p2.lat, p2.lng);
+            const midLat = (p1.lat + p2.lat) / 2;
+            const midLng = (p1.lng + p2.lng) / 2;
+
+            const chevronIcon = L.divIcon({
+              className: 'waze-route-chevron',
+              html: `
+                <div style="transform: rotate(${Math.round(bearing)}deg); display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; pointer-events: none;">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                    <path d="M7 4l8 8-8 8" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.95" />
+                  </svg>
+                </div>
+              `,
+              iconSize: [20, 20],
+              iconAnchor: [10, 10],
+            });
+
+            L.marker([midLat, midLng], { icon: chevronIcon, interactive: false }).addTo(
+              routeChevronsRef.current
+            );
+          }
+        }
+      }
+
+      // Vue ultra-proche Cockpit Waze (Zoom 19.2) sur la position utilisateur ou le départ
+      const startLat = userPosition ? userPosition.lat : latLngs[0][0];
+      const startLng = userPosition ? userPosition.lng : latLngs[0][1];
+      centerCockpitWaze(map, startLat, startLng, 19.2, true);
     }
   }, [activeRoute]);
 
@@ -391,23 +446,23 @@ export const TrailMap: React.FC<TrailMapProps> = ({
 
     if (isFollowing) {
       if (isCockpitMode) {
-        centerCockpitWaze(map, userPosition.lat, userPosition.lng, 18.5);
+        centerCockpitWaze(map, userPosition.lat, userPosition.lng, activeRoute ? 19.2 : 18.5);
       } else {
         map.panTo([userPosition.lat, userPosition.lng], { animate: true });
       }
     }
-  }, [userPosition, isFollowing, isCockpitMode, userAvatar, onOpenAvatarSelector]);
+  }, [userPosition, isFollowing, isCockpitMode, activeRoute, userAvatar, onOpenAvatarSelector]);
 
   // Réaction immédiate et garantie au clic sur le bouton Recentrer
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !userPosition || recenterTrigger === undefined) return;
     if (isCockpitMode) {
-      centerCockpitWaze(map, userPosition.lat, userPosition.lng, 18.5);
+      centerCockpitWaze(map, userPosition.lat, userPosition.lng, activeRoute ? 19.2 : 18.5);
     } else {
       map.setView([userPosition.lat, userPosition.lng], 17, { animate: true });
     }
-  }, [recenterTrigger, isCockpitMode]);
+  }, [recenterTrigger, isCockpitMode, activeRoute]);
 
   // 8. Point survolé sur le profil altimétrique
   useEffect(() => {
@@ -461,14 +516,14 @@ export const TrailMap: React.FC<TrailMapProps> = ({
 
       {/* Commandes rapides Carte (Cockpit & Repère) */}
       <div className="absolute top-28 right-4 z-[900] flex flex-col items-end gap-2">
-        {/* Bouton Waze : Bascule Cockpit Ultra-Proche (18.5) / Vue Large */}
+        {/* Bouton Waze : Bascule Cockpit Ultra-Proche (19.2) / Vue Large */}
         <button
           onClick={() => {
             const nextMode = !isCockpitMode;
             setIsCockpitMode(nextMode);
             if (mapInstanceRef.current && userPosition) {
               if (nextMode) {
-                centerCockpitWaze(mapInstanceRef.current, userPosition.lat, userPosition.lng, 18.5);
+                centerCockpitWaze(mapInstanceRef.current, userPosition.lat, userPosition.lng, 19.2);
               } else {
                 mapInstanceRef.current.setView([userPosition.lat, userPosition.lng], 15, { animate: true });
               }
@@ -477,7 +532,7 @@ export const TrailMap: React.FC<TrailMapProps> = ({
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 backdrop-blur-xl border border-slate-700/80 text-xs font-bold text-slate-200 shadow-md hover:border-emerald-500/50 transition-colors"
           title="Basculer entre vue ultra-rapprochée cockpit et vue large"
         >
-          <span>{isCockpitMode ? '🏎️ Vue Cockpit (18.5)' : '🗺️ Vue Large (15)'}</span>
+          <span>{isCockpitMode ? '🏎️ Cockpit Proche (19.2)' : '🗺️ Vue Large (15)'}</span>
         </button>
 
         {/* Bouton Personnage & Flèche */}

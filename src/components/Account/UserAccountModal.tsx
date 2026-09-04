@@ -9,6 +9,7 @@ interface UserAccountModalProps {
   onClose: () => void;
   savedTrails: Trail[];
   onSelectTrail: (trailId: string) => void;
+  onStartTrail?: (trail: Trail) => void;
   onDeleteSavedTrail: (trailId: string) => void;
   userAvatar?: UserAvatarId;
   onOpenAvatarSelector?: () => void;
@@ -19,6 +20,7 @@ export const UserAccountModal: React.FC<UserAccountModalProps> = ({
   onClose,
   savedTrails,
   onSelectTrail,
+  onStartTrail,
   onDeleteSavedTrail,
   userAvatar = 'hiker',
   onOpenAvatarSelector,
@@ -126,13 +128,17 @@ export const UserAccountModal: React.FC<UserAccountModalProps> = ({
                     <div className="flex items-center gap-2 shrink-0">
                       <button
                         onClick={() => {
-                          onSelectTrail(tr.id);
+                          if (onStartTrail) {
+                            onStartTrail(tr);
+                          } else {
+                            onSelectTrail(tr.id);
+                          }
                           onClose();
                         }}
-                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow transition-transform active:scale-95 flex items-center gap-1"
+                        className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold text-xs shadow transition-transform active:scale-95 flex items-center gap-1.5"
                       >
                         <Navigation className="w-3.5 h-3.5 fill-current" />
-                        <span>Lancer</span>
+                        <span>Démarrer</span>
                       </button>
                       <button
                         onClick={() => onDeleteSavedTrail(tr.id)}
