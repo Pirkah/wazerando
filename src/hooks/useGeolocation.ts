@@ -3,72 +3,78 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 export interface UserLocation {
   lat: number;
   lng: number;
-  altitude: number | null; // en mètres
+  altitude: number; // en mètres
   accuracy: number; // en mètres
-  speed: number | null; // en km/h
-  heading: number | null; // en degrés (0-360)
+  speed: number; // en km/h
+  heading: number; // en degrés (0-360)
   timestamp: number;
-  city?: string;
+  source: 'gps' | 'ip' | 'simulated' | 'manual';
+  label: string;
 }
 
-// Coordonnées par défaut : Limoges (Haute-Vienne)
-const LIMOGES_COORDS = { lat: 45.8336, lng: 1.2611, altitude: 280, city: 'Limoges' };
+// Coordonnées par défaut : Limoges (Bords de Vienne / Centre)
+const LIMOGES_COORDS = { lat: 45.8285, lng: 1.2640, altitude: 245, label: 'Limoges (Bords de Vienne)' };
 
-export function useGeolocation(initialCoords?: { lat: number; lng: number }) {
-  const [location, setLocation] = useState<UserLocation>(() => {
-    return {
-      lat: initialCoords?.lat || LIMOGES_COORDS.lat,
-      lng: initialCoords?.lng || LIMOGES_COORDS.lng,
-      altitude: LIMOGES_COORDS.altitude,
-      accuracy: 10,
-      speed: 0,
-      heading: 0,
-      timestamp: Date.now(),
-      city: 'Limoges',
-    };
+export function useGeolocation() {
+  const [location, setLocation] = useState<UserLocation>({
+    lat: LIMOGES_COORDS.lat,
+    lng: LIMOGES_COORDS.lng,
+    altitude: LIMOGES_COORDS.altitude,
+    accuracy: 10,
+    speed: 0,
+    heading: 0,
+    timestamp: Date.now(),
+    source: 'ip',
+    label: 'Limoges',
   });
 
-  const [error, setError] = useState<string | null>(null);
-  const [isLiveGps, setIsLiveGps] = useState<boolean>(false);
-  const [isFollowing, setIsFollowing] = useState<boolean>(true); // Mode "Suis-moi" Waze
-  const watchIdRef = useRef<number | null>(null);
-  const lastLocationRef = useRef<UserLocation | null>(null);
+  const [isFollowing, setIsFollowing] = useState<boolean>(true); // Suivi caméra Waze
+  const [isSimulating, setIsSimulating] = useState<boolean>(false); // Simulation de marche
+  const [errorNotice, setErrorNotice] = useState<string | null>(null);
 
-  // 1. Détection rapide de la ville par IP (instantané pour situer Limoges avant même l'autorisation GPS)
+  const watchIdRef = useRef<number | null>(null);
+  const simIntervalRef = useRef<any>(null);
+  const lastLocationRef = useRef<UserLocation>(location);
+
+  // 1. Récupération instantanée par IP (place l'utilisateur directement à Limoges/Nouvelle-Aquitaine)
   useEffect(() => {
     let isMounted = true;
     fetch('https://get.geojs.io/v1/ip/geo.json')
       .then((res) => res.json())
       .then((data) => {
-        if (!isMounted || !data.latitude || !data.longitude) return;
-        const ipLat = parseFloat(data.latitude);
-        const ipLng = parseFloat(data.longitude);
-        const cityName = data.city || 'Limoges';
+        if (!isMounted) return;
+        if (data.latitude && data.longitude) {
+          const lat = parseFloat(data.latitude);
+          const lng = parseFloat(data.longitude);
+          const city = data.city || 'Limoges';
 
-        // Mettre à jour si le GPS matériel n'a pas encore répondu
-        setLocation((prev) => {
-          if (isLiveGps) return prev; // Ne pas écraser un vrai GPS matériel
-          return {
-            ...prev,
-            lat: ipLat,
-            lng: ipLng,
-            city: cityName,
-          };
-        });
+          setLocation((prev) => {
+            if (prev.source === 'gps') return prev; // Ne pas écraser un vrai GPS actif
+            const updated: UserLocation = {
+              ...prev,
+              lat,
+              lng,
+              source: 'ip',
+              label: `${city} (Détecté)`,
+            };
+            lastLocationRef.current = updated;
+            return updated;
+          });
+        }
       })
       .catch(() => {
-        // En cas d'erreur réseau, Limoges reste la référence par défaut
+        // Reste sur Limoges par défaut
       });
 
     return () => {
       isMounted = false;
     };
-  }, [isLiveGps]);
+  }, []);
 
-  // 2. Démarrer l'écoute GPS en direct haute précision
-  const startTracking = useCallback(() => {
+  // 2. Écoute du GPS matériel avec stratégie double-palier (Haute précision puis Basse précision)
+  const startGpsTracking = useCallback(() => {
     if (!('geolocation' in navigator)) {
-      setError('La géolocalisation n\'est pas supportée par votre navigateur.');
+      setErrorNotice('La géolocalisation n\'est pas supportée par ce navigateur.');
       return;
     }
 
@@ -76,93 +82,146 @@ export function useGeolocation(initialCoords?: { lat: number; lng: number }) {
       navigator.geolocation.clearWatch(watchIdRef.current);
     }
 
-    const successHandler = (position: GeolocationPosition) => {
+    const handleSuccess = (position: GeolocationPosition) => {
       const { latitude, longitude, altitude, accuracy, speed, heading } = position.coords;
 
       let computedHeading = heading;
-      if (computedHeading === null && lastLocationRef.current) {
-        const dLat = latitude - lastLocationRef.current.lat;
-        const dLng = longitude - lastLocationRef.current.lng;
-        if (Math.abs(dLat) > 0.00005 || Math.abs(dLng) > 0.00005) {
+      if (computedHeading === null || isNaN(computedHeading)) {
+        const prev = lastLocationRef.current;
+        const dLat = latitude - prev.lat;
+        const dLng = longitude - prev.lng;
+        if (Math.abs(dLat) > 0.00002 || Math.abs(dLng) > 0.00002) {
           computedHeading = ((Math.atan2(dLng, dLat) * 180) / Math.PI + 360) % 360;
         } else {
-          computedHeading = lastLocationRef.current.heading;
+          computedHeading = prev.heading;
         }
       }
 
-      const speedKmH = speed !== null ? Math.round(speed * 3.6 * 10) / 10 : 0;
+      const speedKmH = speed !== null && !isNaN(speed) ? Math.round(speed * 3.6 * 10) / 10 : 0;
+      const elev = altitude !== null && !isNaN(altitude) ? Math.round(altitude) : 250;
 
       const newLoc: UserLocation = {
         lat: latitude,
         lng: longitude,
-        altitude: altitude !== null ? Math.round(altitude) : 280,
-        accuracy: Math.round(accuracy),
+        altitude: elev,
+        accuracy: Math.round(accuracy || 10),
         speed: speedKmH,
-        heading: computedHeading !== null ? Math.round(computedHeading) : 0,
+        heading: Math.round(computedHeading || 0),
         timestamp: position.timestamp,
-        city: 'Position GPS Réelle',
+        source: 'gps',
+        label: 'GPS Réel Connecté',
       };
 
       lastLocationRef.current = newLoc;
       setLocation(newLoc);
-      setIsLiveGps(true);
-      setError(null);
+      setErrorNotice(null);
     };
 
-    const errorHandler = (err: GeolocationPositionError) => {
-      let msg = 'Position GPS en attente...';
-      switch (err.code) {
-        case err.PERMISSION_DENIED:
-          msg = 'Autorisation GPS refusée par le navigateur. Position centrée sur Limoges.';
-          break;
-        case err.POSITION_UNAVAILABLE:
-          msg = 'Signal GPS temporairement indisponible.';
-          break;
-        case err.TIMEOUT:
-          msg = 'Délai d\'attente GPS dépassé.';
-          break;
-      }
-      setError(msg);
-      setIsLiveGps(false);
-    };
+    // Palier 1 : Tenter en haute précision (pour smartphones & GPS réels)
+    navigator.geolocation.getCurrentPosition(
+      handleSuccess,
+      (err) => {
+        console.warn('GPS haute précision indisponible, passage en mode standard:', err.message);
+        // Palier 2 : Tenter en mode standard / Wi-Fi (fonctionne sur 100% des ordinateurs portables Mac/Windows)
+        navigator.geolocation.getCurrentPosition(
+          handleSuccess,
+          (err2) => {
+            console.warn('GPS matériel non disponible, positionnement Limoges conservé:', err2.message);
+            setErrorNotice('GPS matériel en attente d\'autorisation. Vous êtes positionné à Limoges.');
+          },
+          { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
+        );
+      },
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+    );
 
-    // Obtenir une première position immédiatement
-    navigator.geolocation.getCurrentPosition(successHandler, errorHandler, {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 0,
-    });
-
-    // Puis surveiller en continu
+    // Écoute continue en direct
     watchIdRef.current = navigator.geolocation.watchPosition(
-      successHandler,
-      errorHandler,
-      {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 1000,
-      }
+      handleSuccess,
+      () => {},
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 2000 }
     );
   }, []);
 
-  const stopTracking = useCallback(() => {
-    if (watchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(watchIdRef.current);
-      watchIdRef.current = null;
-    }
+  // 3. Mode Simulation de Randonnée (Marche active à 4.8 km/h avec direction et dénivelé)
+  const toggleSimulation = useCallback(() => {
+    setIsSimulating((prev) => !prev);
   }, []);
 
   useEffect(() => {
-    startTracking();
-    return () => stopTracking();
-  }, [startTracking, stopTracking]);
+    if (isSimulating) {
+      // Déplacement pas à pas réaliste (avance d'environ 5 mètres chaque seconde = 4.8 km/h)
+      let stepAngle = lastLocationRef.current.heading || 45;
+      simIntervalRef.current = setInterval(() => {
+        setLocation((current) => {
+          // Légère variation de direction pour simuler un sentier sinueux
+          stepAngle = (stepAngle + (Math.random() - 0.5) * 15 + 360) % 360;
+          const rad = (stepAngle * Math.PI) / 180;
+          const distDeltaDeg = 0.000045; // ~5 mètres
+
+          const nextLat = current.lat + Math.cos(rad) * distDeltaDeg;
+          const nextLng = current.lng + Math.sin(rad) * distDeltaDeg * 1.4;
+          const nextAlt = current.altitude + (Math.random() - 0.45) * 2;
+
+          const updated: UserLocation = {
+            lat: nextLat,
+            lng: nextLng,
+            altitude: Math.round(nextAlt),
+            accuracy: 5,
+            speed: 4.8, // 4.8 km/h en marche
+            heading: Math.round(stepAngle),
+            timestamp: Date.now(),
+            source: 'simulated',
+            label: 'Simulation de marche (4.8 km/h)',
+          };
+          lastLocationRef.current = updated;
+          return updated;
+        });
+      }, 1000);
+    } else {
+      if (simIntervalRef.current) clearInterval(simIntervalRef.current);
+    }
+
+    return () => {
+      if (simIntervalRef.current) clearInterval(simIntervalRef.current);
+    };
+  }, [isSimulating]);
+
+  // 4. Définition manuelle de la position (Clic sur la carte)
+  const setManualPosition = useCallback((lat: number, lng: number, label: string = 'Position choisie') => {
+    setIsSimulating(false);
+    setLocation((prev) => {
+      const updated: UserLocation = {
+        ...prev,
+        lat,
+        lng,
+        speed: 0,
+        source: 'manual',
+        label,
+        timestamp: Date.now(),
+      };
+      lastLocationRef.current = updated;
+      return updated;
+    });
+  }, []);
+
+  useEffect(() => {
+    startGpsTracking();
+    return () => {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+    };
+  }, [startGpsTracking]);
 
   return {
     location,
-    isLiveGps,
-    error,
     isFollowing,
     setIsFollowing,
-    startTracking,
+    isSimulating,
+    toggleSimulation,
+    setManualPosition,
+    startGpsTracking,
+    errorNotice,
   };
 }

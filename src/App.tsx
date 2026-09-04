@@ -13,7 +13,7 @@ import { TrailSelector } from './components/Sidebar/TrailSelector';
 import { Menu, PlusCircle, LocateFixed } from 'lucide-react';
 
 export const App: React.FC = () => {
-  // 1. Sentiers disponibles & Sélection
+  // 1. Sentiers disponibles
   const [trails, setTrails] = useState<Trail[]>(() => {
     const saved = localStorage.getItem('wazerando_custom_trails');
     if (saved) {
@@ -32,36 +32,18 @@ export const App: React.FC = () => {
     return trails.find((t) => t.id === selectedTrailId) || trails[0];
   }, [trails, selectedTrailId]);
 
-  // 2. Vraie Géolocalisation GPS
+  // 2. Géolocalisation Réelle & Simulation
   const {
-    location: gpsLocation,
-    isLiveGps,
-    error: gpsError,
+    location: userLocation,
     isFollowing,
     setIsFollowing,
-    startTracking,
-  } = useGeolocation(activeTrail.points[0]);
+    isSimulating,
+    toggleSimulation,
+    setManualPosition,
+    startGpsTracking,
+  } = useGeolocation();
 
-  const userPosition = useMemo(() => {
-    if (gpsLocation) {
-      return {
-        lat: gpsLocation.lat,
-        lng: gpsLocation.lng,
-        heading: gpsLocation.heading || 0,
-        altitude: gpsLocation.altitude || 1400,
-        speed: gpsLocation.speed,
-        accuracy: gpsLocation.accuracy,
-      };
-    }
-    return {
-      lat: activeTrail.points[0]?.lat || 45.955,
-      lng: activeTrail.points[0]?.lng || 6.885,
-      heading: 0,
-      altitude: 1410,
-      speed: 0,
-      accuracy: 15,
-    };
-  }, [gpsLocation, activeTrail]);
+  const [isClickToMoveMode, setIsClickToMoveMode] = useState<boolean>(false);
 
   // 3. Spots communautaires Waze
   const [spots, setSpots] = useState<CommunitySpot[]>(() => {
@@ -101,20 +83,20 @@ export const App: React.FC = () => {
   const [isRoutingLoading, setIsRoutingLoading] = useState<boolean>(false);
 
   const handleStartNavigationToSpot = async (spot: CommunitySpot) => {
-    if (!userPosition) return;
+    if (!userLocation) return;
     setIsRoutingLoading(true);
     try {
       const route = await calculatePedestrianRoute(
-        userPosition.lat,
-        userPosition.lng,
+        userLocation.lat,
+        userLocation.lng,
         spot.lat,
         spot.lng,
         spot.title,
-        userPosition.altitude || 1400,
+        userLocation.altitude || 250,
         spot.elevation
       );
       setActiveRoute(route);
-      setIsFollowing(true); // Active automatiquement la caméra Waze
+      setIsFollowing(true);
     } catch (err) {
       console.error('Erreur de calcul d\'itinéraire:', err);
     } finally {
@@ -126,7 +108,7 @@ export const App: React.FC = () => {
     setActiveRoute(null);
   };
 
-  // 6. Profil Altimétrique Actif (Itinéraire en cours ou Sentier)
+  // 6. Profil Altimétrique Actif
   const activeElevationTrail: Trail = useMemo(() => {
     if (activeRoute && activeRoute.points.length > 0) {
       return {
@@ -141,15 +123,14 @@ export const App: React.FC = () => {
         minElevation: activeRoute.minElevation,
         estimatedDuration: Math.round(activeRoute.duration / 60),
         points: activeRoute.points,
-        initialCenter: [userPosition.lat, userPosition.lng],
+        initialCenter: [userLocation.lat, userLocation.lng],
         initialZoom: 15,
         description: 'Calcul d\'itinéraire Waze',
       };
     }
     return activeTrail;
-  }, [activeRoute, activeTrail, userPosition]);
+  }, [activeRoute, activeTrail, userLocation]);
 
-  // Point survolé sur le profil altimétrique
   const [hoveredPoint, setHoveredPoint] = useState<ElevationPoint | null>(null);
 
   // 7. Modales
@@ -159,7 +140,6 @@ export const App: React.FC = () => {
   const [isReportingMode, setIsReportingMode] = useState<boolean>(false);
   const [clickedCoords, setClickedCoords] = useState<{ lat: number; lng: number } | null>(null);
 
-  // Actions spots
   const handleVote = (spotId: string, direction: 'up' | 'down') => {
     setSpots((prev) =>
       prev.map((s) => {
@@ -246,7 +226,15 @@ export const App: React.FC = () => {
     );
   };
 
+  // Clic carte : Téléportation GPS ou Signalement
   const handleMapClick = (lat: number, lng: number) => {
+    if (isClickToMoveMode) {
+      setManualPosition(lat, lng, 'Position manuelle');
+      setIsClickToMoveMode(false);
+      setIsFollowing(true);
+      return;
+    }
+
     if (isReportingMode) {
       setClickedCoords({ lat, lng });
       setIsReportModalOpen(true);
@@ -256,17 +244,22 @@ export const App: React.FC = () => {
 
   return (
     <div className="relative w-screen h-screen overflow-hidden flex flex-col bg-slate-950">
-      {/* 1. Guidage Waze HUD (Bandeau de navigation ou Recherche "Où aller ?") */}
+      {/* 1. Guidage Waze HUD & Barre GPS */}
       <GuidanceHUD
-        userPosition={userPosition}
+        userPosition={userLocation}
         spots={filteredSpots}
         activeRoute={activeRoute}
         onStopNavigation={handleStopNavigation}
         onNavigateToSpot={handleStartNavigationToSpot}
         onSelectSpot={(spot) => setSelectedSpot(spot)}
-        isLiveGps={isLiveGps}
-        gpsError={gpsError}
-        onEnableGps={startTracking}
+        isSimulating={isSimulating}
+        onToggleSimulation={toggleSimulation}
+        onRecenter={() => {
+          setIsFollowing(true);
+          startGpsTracking();
+        }}
+        isClickToMoveMode={isClickToMoveMode}
+        onToggleClickToMove={() => setIsClickToMoveMode(!isClickToMoveMode)}
       />
 
       {/* 2. Boutons d'accès rapide flottants sur la carte */}
@@ -284,14 +277,14 @@ export const App: React.FC = () => {
         <button
           onClick={() => {
             setIsFollowing(true);
-            startTracking();
+            startGpsTracking();
           }}
           className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-hud border transition-all active:scale-95 ${
-            isFollowing && isLiveGps
+            isFollowing
               ? 'bg-sky-500 border-sky-300 text-white'
               : 'bg-slate-900/90 hover:bg-slate-800 text-slate-300 border-slate-700/80'
           }`}
-          title="Centrer sur ma position GPS réelle"
+          title="Recentrer sur mon GPS"
         >
           <LocateFixed className="w-5 h-5" />
         </button>
@@ -303,7 +296,7 @@ export const App: React.FC = () => {
           trail={activeTrail}
           spots={filteredSpots}
           activeLayer={activeLayer}
-          userPosition={userPosition}
+          userPosition={userLocation}
           hoveredPoint={hoveredPoint}
           activeRoute={activeRoute}
           isFollowing={isFollowing}
@@ -315,10 +308,10 @@ export const App: React.FC = () => {
 
         {/* Compteur Waze (Vitesse km/h + Altitude m) */}
         <WazeSpeedometer
-          speed={userPosition?.speed ?? null}
-          altitude={userPosition?.altitude ?? null}
-          heading={userPosition?.heading ?? null}
-          accuracy={userPosition?.accuracy}
+          speed={userLocation.speed}
+          altitude={userLocation.altitude}
+          heading={userLocation.heading}
+          accuracy={userLocation.accuracy}
         />
 
         {/* Bouton Waze Flottant : SIGNALER */}
@@ -368,9 +361,9 @@ export const App: React.FC = () => {
         isOpen={isReportModalOpen}
         onClose={() => setIsReportModalOpen(false)}
         onSubmit={handleCreateReport}
-        currentPosition={userPosition}
+        currentPosition={userLocation}
         clickedPosition={clickedCoords}
-        currentElevation={userPosition?.altitude || 1400}
+        currentElevation={userLocation.altitude}
       />
 
       {/* 6. Modale de Détails d'un Spot */}
@@ -380,7 +373,7 @@ export const App: React.FC = () => {
         onVote={handleVote}
         onVerify={handleVerify}
         onAddComment={handleAddComment}
-        userPosition={userPosition}
+        userPosition={userLocation}
       />
 
       {/* 7. Volet Latéral Sélecteur de Rando & Calques */}
