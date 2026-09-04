@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Trail, CommunitySpot, MapTileLayer, SpotCategory, ElevationPoint } from './types';
+import { Trail, CommunitySpot, MapTileLayer, SpotCategory, ElevationPoint, UserAvatarId } from './types';
 import { MOCK_TRAILS, INITIAL_COMMUNITY_SPOTS } from './data/mockTrails';
 import { useGeolocation } from './hooks/useGeolocation';
 import { calculatePedestrianRoute, NavigationRoute } from './services/routingService';
@@ -12,6 +12,7 @@ import { SpotDetailsModal } from './components/Modals/SpotDetailsModal';
 import { TrailSelector } from './components/Sidebar/TrailSelector';
 import { TrailPlannerModal } from './components/Studio/TrailPlannerModal';
 import { UserAccountModal } from './components/Account/UserAccountModal';
+import { AvatarSelectorModal } from './components/Modals/AvatarSelectorModal';
 import { Menu, PlusCircle, LocateFixed, Monitor, User } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -139,6 +140,17 @@ export const App: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
   const [isStudioOpen, setIsStudioOpen] = useState<boolean>(false);
   const [isAccountOpen, setIsAccountOpen] = useState<boolean>(false);
+  const [isAvatarModalOpen, setIsAvatarModalOpen] = useState<boolean>(false);
+  const [userAvatar, setUserAvatar] = useState<UserAvatarId>(() => {
+    const saved = localStorage.getItem('wazerando_user_avatar');
+    return (saved as UserAvatarId) || 'hiker';
+  });
+
+  const handleSelectAvatar = (newAvatar: UserAvatarId) => {
+    setUserAvatar(newAvatar);
+    localStorage.setItem('wazerando_user_avatar', newAvatar);
+  };
+
   const [selectedSpot, setSelectedSpot] = useState<CommunitySpot | null>(null);
   const [isReportModalOpen, setIsReportModalOpen] = useState<boolean>(false);
   const [isReportingMode, setIsReportingMode] = useState<boolean>(false);
@@ -355,6 +367,8 @@ export const App: React.FC = () => {
           spots={filteredSpots}
           activeLayer={activeLayer}
           userPosition={userLocation}
+          userAvatar={userAvatar}
+          onOpenAvatarSelector={() => setIsAvatarModalOpen(true)}
           hoveredPoint={hoveredPoint}
           activeRoute={activeRoute}
           isFollowing={isFollowing}
@@ -471,6 +485,18 @@ export const App: React.FC = () => {
           setActiveRoute(null);
         }}
         onDeleteSavedTrail={handleDeleteSavedTrail}
+        userAvatar={userAvatar}
+        onOpenAvatarSelector={() => setIsAvatarModalOpen(true)}
+      />
+
+      {/* 10. Modale Choix du Personnage / Flèche Waze */}
+      <AvatarSelectorModal
+        isOpen={isAvatarModalOpen}
+        onClose={() => setIsAvatarModalOpen(false)}
+        selectedAvatar={userAvatar}
+        onSelectAvatar={handleSelectAvatar}
+        currentHeading={userLocation?.heading}
+        currentSpeed={userLocation?.speed}
       />
     </div>
   );

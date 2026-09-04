@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Trail } from '../../types';
+import { Trail, UserAvatarId } from '../../types';
+import { USER_AVATARS } from '../../data/avatarConfig';
 import { formatDistance, formatElevation, formatDuration } from '../../utils/geoUtils';
 import { X, User, ShieldCheck, Navigation, Compass, Trash2, Smartphone, Monitor } from 'lucide-react';
 
@@ -9,6 +10,8 @@ interface UserAccountModalProps {
   savedTrails: Trail[];
   onSelectTrail: (trailId: string) => void;
   onDeleteSavedTrail: (trailId: string) => void;
+  userAvatar?: UserAvatarId;
+  onOpenAvatarSelector?: () => void;
 }
 
 export const UserAccountModal: React.FC<UserAccountModalProps> = ({
@@ -17,6 +20,8 @@ export const UserAccountModal: React.FC<UserAccountModalProps> = ({
   savedTrails,
   onSelectTrail,
   onDeleteSavedTrail,
+  userAvatar = 'hiker',
+  onOpenAvatarSelector,
 }) => {
   const [activeTab, setActiveTab] = useState<'profile' | 'myTrails'>('myTrails');
 
@@ -190,6 +195,20 @@ export const UserAccountModal: React.FC<UserAccountModalProps> = ({
                 <div className="flex items-center justify-between text-slate-300">
                   <span className="font-semibold">Mode Téléphone PWA :</span>
                   <span className="font-bold text-slate-200">Prêt à installer sur smartphone</span>
+                </div>
+                <div className="flex items-center justify-between text-slate-300 pt-1 border-t border-slate-800/80">
+                  <span className="font-semibold">Repère sur la carte :</span>
+                  <button
+                    onClick={() => {
+                      onClose();
+                      if (onOpenAvatarSelector) onOpenAvatarSelector();
+                    }}
+                    className="font-bold text-sky-300 hover:text-white flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-950/70 border border-sky-700/50 hover:border-sky-500 transition-colors"
+                  >
+                    <span>{USER_AVATARS.find((a) => a.id === userAvatar)?.emoji || '🚶‍♂️'}</span>
+                    <span>{USER_AVATARS.find((a) => a.id === userAvatar)?.name || 'Randonneur'}</span>
+                    <span className="text-[10px] text-sky-400 font-normal">➔ Modifier</span>
+                  </button>
                 </div>
               </div>
             </div>

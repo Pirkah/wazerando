@@ -1,13 +1,16 @@
 import React, { useEffect, useRef } from 'react';
 import L from 'leaflet';
-import { Trail, CommunitySpot, MapTileLayer, ElevationPoint } from '../../types';
+import { Trail, CommunitySpot, MapTileLayer, ElevationPoint, UserAvatarId } from '../../types';
 import { NavigationRoute } from '../../services/routingService';
+import { generateUserMarkerHtml, USER_AVATARS } from '../../data/avatarConfig';
 
 interface TrailMapProps {
   trail: Trail | null;
   spots: CommunitySpot[];
   activeLayer: MapTileLayer;
-  userPosition: { lat: number; lng: number; heading: number; accuracy?: number } | null;
+  userPosition: { lat: number; lng: number; heading: number; accuracy?: number; speed?: number } | null;
+  userAvatar?: UserAvatarId;
+  onOpenAvatarSelector?: () => void;
   hoveredPoint: ElevationPoint | null;
   activeRoute: NavigationRoute | null;
   isFollowing: boolean;
@@ -67,6 +70,8 @@ export const TrailMap: React.FC<TrailMapProps> = ({
   spots,
   activeLayer,
   userPosition,
+  userAvatar = 'hiker',
+  onOpenAvatarSelector,
   hoveredPoint,
   activeRoute,
   isFollowing,
@@ -304,31 +309,31 @@ export const TrailMap: React.FC<TrailMapProps> = ({
     const map = mapInstanceRef.current;
     if (!map || !userPosition) return;
 
-    const heading = userPosition.heading || 0;
-
-    const userHtml = `
-      <div class="relative flex items-center justify-center">
-        <div class="absolute w-14 h-14 rounded-full bg-sky-500/20 animate-pulse-ring"></div>
-        <div class="absolute w-10 h-10 rounded-full bg-sky-400/25"></div>
-        <div style="transform: rotate(${heading}deg);" class="absolute -top-4 w-0 h-0 border-l-[7px] border-l-transparent border-r-[7px] border-r-transparent border-b-[14px] border-b-sky-400 drop-shadow transition-transform duration-300"></div>
-        <div class="w-6 h-6 rounded-full bg-sky-500 border-2 border-white shadow-lg z-10 flex items-center justify-center">
-          <div class="w-2.5 h-2.5 rounded-full bg-white"></div>
-        </div>
-      </div>
-    `;
+    const userHtml = generateUserMarkerHtml(
+      userAvatar || 'hiker',
+      userPosition.heading || 0,
+      userPosition.speed || 0
+    );
 
     const userIcon = L.divIcon({
       className: 'user-location-pin',
       html: userHtml,
-      iconSize: [48, 48],
-      iconAnchor: [24, 24],
+      iconSize: [80, 80],
+      iconAnchor: [40, 40],
     });
 
     if (!userMarkerRef.current) {
       userMarkerRef.current = L.marker([userPosition.lat, userPosition.lng], {
         icon: userIcon,
-        zIndexOffset: 1000,
+        zIndexOffset: 2000,
       }).addTo(map);
+
+      userMarkerRef.current.on('click', (e: L.LeafletMouseEvent) => {
+        L.DomEvent.stopPropagation(e);
+        if (onOpenAvatarSelector) {
+          onOpenAvatarSelector();
+        }
+      });
     } else {
       userMarkerRef.current.setLatLng([userPosition.lat, userPosition.lng]);
       userMarkerRef.current.setIcon(userIcon);
@@ -355,7 +360,7 @@ export const TrailMap: React.FC<TrailMapProps> = ({
         map.panTo([userPosition.lat, userPosition.lng], { animate: true });
       }
     }
-  }, [userPosition, isFollowing, isCockpitMode]);
+  }, [userPosition, isFollowing, isCockpitMode, userAvatar, onOpenAvatarSelector]);
 
   // 8. Point survolé sur le profil altimétrique
   useEffect(() => {
@@ -407,24 +412,41 @@ export const TrailMap: React.FC<TrailMapProps> = ({
         }`}
       />
 
-      {/* Bouton Waze : Bascule Cockpit Ultra-Proche (18.5) / Vue Large */}
-      <button
-        onClick={() => {
-          const nextMode = !isCockpitMode;
-          setIsCockpitMode(nextMode);
-          if (mapInstanceRef.current && userPosition) {
-            if (nextMode) {
-              centerCockpitWaze(mapInstanceRef.current, userPosition.lat, userPosition.lng, 18.5);
-            } else {
-              mapInstanceRef.current.setView([userPosition.lat, userPosition.lng], 15, { animate: true });
+      {/* Commandes rapides Carte (Cockpit & Repère) */}
+      <div className="absolute top-20 right-4 z-[900] flex flex-col items-end gap-2">
+        {/* Bouton Waze : Bascule Cockpit Ultra-Proche (18.5) / Vue Large */}
+        <button
+          onClick={() => {
+            const nextMode = !isCockpitMode;
+            setIsCockpitMode(nextMode);
+            if (mapInstanceRef.current && userPosition) {
+              if (nextMode) {
+                centerCockpitWaze(mapInstanceRef.current, userPosition.lat, userPosition.lng, 18.5);
+              } else {
+                mapInstanceRef.current.setView([userPosition.lat, userPosition.lng], 15, { animate: true });
+              }
             }
-          }
-        }}
-        className="absolute top-20 right-4 z-[900] flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 backdrop-blur-xl border border-slate-700/80 text-xs font-bold text-slate-200 shadow-md hover:border-emerald-500/50 transition-colors"
-        title="Basculer entre vue ultra-rapprochée cockpit et vue large"
-      >
-        <span>{isCockpitMode ? '🏎️ Vue Cockpit (18.5)' : '🗺️ Vue Large (15)'}</span>
-      </button>
+          }}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 backdrop-blur-xl border border-slate-700/80 text-xs font-bold text-slate-200 shadow-md hover:border-emerald-500/50 transition-colors"
+          title="Basculer entre vue ultra-rapprochée cockpit et vue large"
+        >
+          <span>{isCockpitMode ? '🏎️ Vue Cockpit (18.5)' : '🗺️ Vue Large (15)'}</span>
+        </button>
+
+        {/* Bouton Personnage & Flèche */}
+        {onOpenAvatarSelector && (
+          <button
+            onClick={onOpenAvatarSelector}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 backdrop-blur-xl border border-sky-500/50 hover:border-sky-400 text-xs font-bold text-sky-200 shadow-md transition-all active:scale-95"
+            title="Changer de personnage ou de flèche de navigation"
+          >
+            <span className="text-sm">
+              {USER_AVATARS.find((a) => a.id === userAvatar)?.emoji || '🚶‍♂️'}
+            </span>
+            <span>Mon Repère</span>
+          </button>
+        )}
+      </div>
 
       {/* Bouton Waze : Recentrer sur ma position */}
       {!isFollowing && userPosition && (

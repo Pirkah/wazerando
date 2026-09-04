@@ -71,6 +71,38 @@ export function useGeolocation() {
     };
   }, []);
 
+  // 1b. Écoute de la boussole mobile (Device Orientation / Compass)
+  useEffect(() => {
+    const handleOrientation = (e: DeviceOrientationEvent) => {
+      const compassHeading = (e as any).webkitCompassHeading;
+      let angle: number | null = null;
+      if (typeof compassHeading === 'number' && !isNaN(compassHeading)) {
+        angle = compassHeading;
+      } else if (e.alpha !== null && !isNaN(e.alpha)) {
+        angle = (360 - e.alpha) % 360;
+      }
+      if (angle !== null) {
+        setLocation((prev) => {
+          if (prev.speed < 1.5) {
+            const updated = { ...prev, heading: Math.round(angle!) };
+            lastLocationRef.current = updated;
+            return updated;
+          }
+          return prev;
+        });
+      }
+    };
+
+    if (typeof window !== 'undefined' && 'DeviceOrientationEvent' in window) {
+      window.addEventListener('deviceorientation', handleOrientation, true);
+    }
+    return () => {
+      if (typeof window !== 'undefined' && 'DeviceOrientationEvent' in window) {
+        window.removeEventListener('deviceorientation', handleOrientation, true);
+      }
+    };
+  }, []);
+
   // 2. Écoute du GPS matériel avec stratégie double-palier (Haute précision puis Basse précision)
   const startGpsTracking = useCallback(() => {
     if (!('geolocation' in navigator)) {

@@ -66,3 +66,13 @@ export interface Trail {
 }
 
 export type MapTileLayer = 'opentopo' | 'outdoors' | 'satellite' | 'standard';
+
+export type UserAvatarId = 'hiker' | 'arrow' | 'runner' | 'fox' | 'neon';
+
+export interface UserAvatarOption {
+  id: UserAvatarId;
+  name: string;
+  badge: string;
+  emoji: string;
+  description: string;
+}
