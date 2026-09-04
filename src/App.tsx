@@ -10,7 +10,9 @@ import { WazeSpeedometer } from './components/WazeHUD/WazeSpeedometer';
 import { ReportModal } from './components/Modals/ReportModal';
 import { SpotDetailsModal } from './components/Modals/SpotDetailsModal';
 import { TrailSelector } from './components/Sidebar/TrailSelector';
-import { Menu, PlusCircle, LocateFixed } from 'lucide-react';
+import { TrailPlannerModal } from './components/Studio/TrailPlannerModal';
+import { UserAccountModal } from './components/Account/UserAccountModal';
+import { Menu, PlusCircle, LocateFixed, Monitor, User } from 'lucide-react';
 
 export const App: React.FC = () => {
   // 1. Sentiers disponibles
@@ -135,6 +137,8 @@ export const App: React.FC = () => {
 
   // 7. Modales
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
+  const [isStudioOpen, setIsStudioOpen] = useState<boolean>(false);
+  const [isAccountOpen, setIsAccountOpen] = useState<boolean>(false);
   const [selectedSpot, setSelectedSpot] = useState<CommunitySpot | null>(null);
   const [isReportModalOpen, setIsReportModalOpen] = useState<boolean>(false);
   const [isReportingMode, setIsReportingMode] = useState<boolean>(false);
@@ -220,6 +224,38 @@ export const App: React.FC = () => {
     setActiveRoute(null);
   };
 
+  const handleSavePlannedTrail = (newTrail: Trail) => {
+    setTrails((prev) => {
+      const updated = [newTrail, ...prev];
+      const customOnly = updated.filter(
+        (t) => !MOCK_TRAILS.some((m) => m.id === t.id)
+      );
+      localStorage.setItem('wazerando_custom_trails', JSON.stringify(customOnly));
+      return updated;
+    });
+    setSelectedTrailId(newTrail.id);
+    setActiveRoute(null);
+  };
+
+  const handleDeleteSavedTrail = (trailId: string) => {
+    setTrails((prev) => {
+      const updated = prev.filter((t) => t.id !== trailId);
+      const customOnly = updated.filter(
+        (t) => !MOCK_TRAILS.some((m) => m.id === t.id)
+      );
+      localStorage.setItem('wazerando_custom_trails', JSON.stringify(customOnly));
+      return updated;
+    });
+    if (selectedTrailId === trailId) {
+      setSelectedTrailId(MOCK_TRAILS[0].id);
+      setActiveRoute(null);
+    }
+  };
+
+  const savedTrails = useMemo(() => {
+    return trails.filter((t) => !MOCK_TRAILS.some((m) => m.id === t.id));
+  }, [trails]);
+
   const handleToggleCategory = (cat: SpotCategory) => {
     setSelectedCategories((prev) =>
       prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
@@ -277,7 +313,25 @@ export const App: React.FC = () => {
         </button>
       </div>
 
-      <div className="absolute top-4 right-4 z-[960] flex flex-col gap-2">
+      <div className="absolute top-4 right-4 z-[960] flex items-center gap-2">
+        <button
+          onClick={() => setIsStudioOpen(true)}
+          className="h-11 px-3.5 rounded-2xl bg-slate-900/90 hover:bg-slate-800 text-white flex items-center gap-2 shadow-hud border border-slate-700/80 transition-transform active:scale-95"
+          title="Studio de préparation PC"
+        >
+          <Monitor className="w-4 h-4 text-sky-400" />
+          <span className="hidden sm:inline text-xs font-bold text-slate-200">Studio PC</span>
+        </button>
+
+        <button
+          onClick={() => setIsAccountOpen(true)}
+          className="h-11 px-3.5 rounded-2xl bg-slate-900/90 hover:bg-slate-800 text-white flex items-center gap-2 shadow-hud border border-slate-700/80 transition-transform active:scale-95"
+          title="Mon Compte Randonneur"
+        >
+          <User className="w-4 h-4 text-emerald-400" />
+          <span className="hidden sm:inline text-xs font-bold text-slate-200">Mon Compte</span>
+        </button>
+
         <button
           onClick={() => {
             setIsFollowing(true);
@@ -395,6 +449,28 @@ export const App: React.FC = () => {
         onChangeLayer={setActiveLayer}
         selectedCategories={selectedCategories}
         onToggleCategory={handleToggleCategory}
+        onOpenStudio={() => setIsStudioOpen(true)}
+        onOpenAccount={() => setIsAccountOpen(true)}
+      />
+
+      {/* 8. Studio PC de Préparation de Randonnée */}
+      <TrailPlannerModal
+        isOpen={isStudioOpen}
+        onClose={() => setIsStudioOpen(false)}
+        onSaveTrail={handleSavePlannedTrail}
+        userCoords={userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : null}
+      />
+
+      {/* 9. Modale Compte Utilisateur & Sync Cloud */}
+      <UserAccountModal
+        isOpen={isAccountOpen}
+        onClose={() => setIsAccountOpen(false)}
+        savedTrails={savedTrails}
+        onSelectTrail={(trailId) => {
+          setSelectedTrailId(trailId);
+          setActiveRoute(null);
+        }}
+        onDeleteSavedTrail={handleDeleteSavedTrail}
       />
     </div>
   );

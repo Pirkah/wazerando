@@ -53,6 +53,15 @@ const CATEGORY_COLORS: Record<string, { bg: string; border: string; emoji: strin
   shelter: { bg: 'bg-pink-600', border: 'border-pink-300', emoji: '🛖' },
 };
 
+// Fonction de centrage décalé "Cockpit Waze" (place le randonneur dans le tiers inférieur de l'écran)
+function centerCockpitWaze(map: L.Map, lat: number, lng: number, zoomLevel = 18.5) {
+  const containerHeight = map.getSize().y || 600;
+  const targetPoint = map.project([lat, lng], zoomLevel);
+  const shiftedPoint = L.point(targetPoint.x, targetPoint.y - containerHeight * 0.22);
+  const shiftedLatLng = map.unproject(shiftedPoint, zoomLevel);
+  map.setView(shiftedLatLng, zoomLevel, { animate: true });
+}
+
 export const TrailMap: React.FC<TrailMapProps> = ({
   trail,
   spots,
@@ -66,6 +75,7 @@ export const TrailMap: React.FC<TrailMapProps> = ({
   onMapClick,
   isReportingMode,
 }) => {
+  const [isCockpitMode, setIsCockpitMode] = React.useState<boolean>(true);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
@@ -83,14 +93,15 @@ export const TrailMap: React.FC<TrailMapProps> = ({
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
-    // Centrage initial au niveau de la rue (zoom 17 comme en voiture / Waze)
     const initialLat = userPosition?.lat || 45.8285;
     const initialLng = userPosition?.lng || 1.2672;
 
+    // Zoom initial 18.5 ultra-rapproché "comme en voiture"
     const map = L.map(mapContainerRef.current, {
       center: [initialLat, initialLng],
-      zoom: 17,
+      zoom: 18.5,
       zoomControl: false,
+      maxZoom: 19,
     });
 
     L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -106,6 +117,11 @@ export const TrailMap: React.FC<TrailMapProps> = ({
     spotMarkersLayerRef.current = L.layerGroup().addTo(map);
     startEndMarkersRef.current = L.layerGroup().addTo(map);
     mapInstanceRef.current = map;
+
+    // Centrage cockpit initial décalé
+    setTimeout(() => {
+      centerCockpitWaze(map, initialLat, initialLng, 18.5);
+    }, 200);
 
     map.on('dragstart', () => {
       onSetIsFollowing(false);
@@ -333,11 +349,13 @@ export const TrailMap: React.FC<TrailMapProps> = ({
     }
 
     if (isFollowing) {
-      const currentZoom = map.getZoom();
-      const targetZoom = Math.max(currentZoom, 17);
-      map.setView([userPosition.lat, userPosition.lng], targetZoom, { animate: true });
+      if (isCockpitMode) {
+        centerCockpitWaze(map, userPosition.lat, userPosition.lng, 18.5);
+      } else {
+        map.panTo([userPosition.lat, userPosition.lng], { animate: true });
+      }
     }
-  }, [userPosition, isFollowing]);
+  }, [userPosition, isFollowing, isCockpitMode]);
 
   // 8. Point survolé sur le profil altimétrique
   useEffect(() => {
@@ -389,13 +407,36 @@ export const TrailMap: React.FC<TrailMapProps> = ({
         }`}
       />
 
+      {/* Bouton Waze : Bascule Cockpit Ultra-Proche (18.5) / Vue Large */}
+      <button
+        onClick={() => {
+          const nextMode = !isCockpitMode;
+          setIsCockpitMode(nextMode);
+          if (mapInstanceRef.current && userPosition) {
+            if (nextMode) {
+              centerCockpitWaze(mapInstanceRef.current, userPosition.lat, userPosition.lng, 18.5);
+            } else {
+              mapInstanceRef.current.setView([userPosition.lat, userPosition.lng], 15, { animate: true });
+            }
+          }
+        }}
+        className="absolute top-20 right-4 z-[900] flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 backdrop-blur-xl border border-slate-700/80 text-xs font-bold text-slate-200 shadow-md hover:border-emerald-500/50 transition-colors"
+        title="Basculer entre vue ultra-rapprochée cockpit et vue large"
+      >
+        <span>{isCockpitMode ? '🏎️ Vue Cockpit (18.5)' : '🗺️ Vue Large (15)'}</span>
+      </button>
+
       {/* Bouton Waze : Recentrer sur ma position */}
       {!isFollowing && userPosition && (
         <button
           onClick={() => {
             onSetIsFollowing(true);
             if (mapInstanceRef.current && userPosition) {
-              mapInstanceRef.current.setView([userPosition.lat, userPosition.lng], 17.5, { animate: true });
+              if (isCockpitMode) {
+                centerCockpitWaze(mapInstanceRef.current, userPosition.lat, userPosition.lng, 18.5);
+              } else {
+                mapInstanceRef.current.setView([userPosition.lat, userPosition.lng], 16, { animate: true });
+              }
             }
           }}
           className="absolute bottom-28 right-4 z-[900] flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-slate-900/90 backdrop-blur-xl border border-sky-500/60 text-sky-400 text-xs font-bold shadow-float animate-bounce"

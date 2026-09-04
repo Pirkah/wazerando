@@ -15,6 +15,8 @@ interface TrailSelectorProps {
   onChangeLayer: (layer: MapTileLayer) => void;
   selectedCategories: SpotCategory[];
   onToggleCategory: (category: SpotCategory) => void;
+  onOpenStudio?: () => void;
+  onOpenAccount?: () => void;
 }
 
 const TILE_OPTIONS: { id: MapTileLayer; label: string; icon: string; desc: string }[] = [
@@ -45,6 +47,8 @@ export const TrailSelector: React.FC<TrailSelectorProps> = ({
   onChangeLayer,
   selectedCategories,
   onToggleCategory,
+  onOpenStudio,
+  onOpenAccount,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -88,6 +92,34 @@ export const TrailSelector: React.FC<TrailSelectorProps> = ({
           >
             <X className="w-5 h-5" />
           </button>
+        </div>
+
+        {/* Raccourcis Studio & Compte */}
+        <div className="p-3 bg-slate-950/40 border-b border-slate-800/80 grid grid-cols-2 gap-2">
+          {onOpenStudio && (
+            <button
+              onClick={() => {
+                onClose();
+                onOpenStudio();
+              }}
+              className="px-3 py-2 rounded-xl bg-sky-950/60 hover:bg-sky-900/60 border border-sky-700/50 text-sky-200 text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+            >
+              <span>💻</span>
+              <span>Studio PC</span>
+            </button>
+          )}
+          {onOpenAccount && (
+            <button
+              onClick={() => {
+                onClose();
+                onOpenAccount();
+              }}
+              className="px-3 py-2 rounded-xl bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-700/50 text-emerald-200 text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+            >
+              <span>👤</span>
+              <span>Mon Compte</span>
+            </button>
+          )}
         </div>
 
         {/* Contenu défilant */}
