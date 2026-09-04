@@ -58,12 +58,20 @@ const CATEGORY_COLORS: Record<string, { bg: string; border: string; emoji: strin
 };
 
 // Fonction de centrage décalé "Cockpit Waze" (place le randonneur dans le tiers inférieur de l'écran)
-function centerCockpitWaze(map: L.Map, lat: number, lng: number, zoomLevel = 18.5) {
-  const containerHeight = map.getSize().y || 600;
-  const targetPoint = map.project([lat, lng], zoomLevel);
-  const shiftedPoint = L.point(targetPoint.x, targetPoint.y - containerHeight * 0.22);
-  const shiftedLatLng = map.unproject(shiftedPoint, zoomLevel);
-  map.setView(shiftedLatLng, zoomLevel, { animate: true });
+function centerCockpitWaze(map: L.Map, lat: number, lng: number, zoomLevel = 18.5, animate = false) {
+  if (!map) return;
+  try {
+    const size = map.getSize();
+    const containerHeight = (size && size.y > 0) ? size.y : 600;
+    const targetPoint = map.project([lat, lng], zoomLevel);
+    const shiftedPoint = L.point(targetPoint.x, targetPoint.y - containerHeight * 0.22);
+    const shiftedLatLng = map.unproject(shiftedPoint, zoomLevel);
+    map.setView(shiftedLatLng, zoomLevel, { animate });
+  } catch (err) {
+    try {
+      map.setView([lat, lng], zoomLevel, { animate: false });
+    } catch (_) {}
+  }
 }
 
 export const TrailMap: React.FC<TrailMapProps> = ({
@@ -125,10 +133,12 @@ export const TrailMap: React.FC<TrailMapProps> = ({
     startEndMarkersRef.current = L.layerGroup().addTo(map);
     mapInstanceRef.current = map;
 
-    // Centrage cockpit initial décalé
-    setTimeout(() => {
-      centerCockpitWaze(map, initialLat, initialLng, 18.5);
-    }, 200);
+    // Centrage cockpit initial décalé une fois la carte prête
+    map.whenReady(() => {
+      setTimeout(() => {
+        centerCockpitWaze(map, initialLat, initialLng, 18.5, false);
+      }, 100);
+    });
 
     map.on('dragstart', () => {
       onSetIsFollowing(false);
@@ -145,6 +155,18 @@ export const TrailMap: React.FC<TrailMapProps> = ({
 
     return () => {
       resizeObserver.disconnect();
+      if (userMarkerRef.current) {
+        try { map.removeLayer(userMarkerRef.current); } catch (_) {}
+        userMarkerRef.current = null;
+      }
+      if (accuracyCircleRef.current) {
+        try { map.removeLayer(accuracyCircleRef.current); } catch (_) {}
+        accuracyCircleRef.current = null;
+      }
+      if (hoveredMarkerRef.current) {
+        try { map.removeLayer(hoveredMarkerRef.current); } catch (_) {}
+        hoveredMarkerRef.current = null;
+      }
       map.remove();
       mapInstanceRef.current = null;
     };
@@ -330,7 +352,10 @@ export const TrailMap: React.FC<TrailMapProps> = ({
       iconAnchor: [45, 45],
     });
 
-    if (!userMarkerRef.current) {
+    if (!userMarkerRef.current || (userMarkerRef.current as any)._map !== map) {
+      if (userMarkerRef.current) {
+        try { map.removeLayer(userMarkerRef.current); } catch (_) {}
+      }
       userMarkerRef.current = L.marker([userPosition.lat, userPosition.lng], {
         icon: userIcon,
         zIndexOffset: 3000,
@@ -348,7 +373,10 @@ export const TrailMap: React.FC<TrailMapProps> = ({
     }
 
     const accuracy = userPosition.accuracy || 15;
-    if (!accuracyCircleRef.current) {
+    if (!accuracyCircleRef.current || (accuracyCircleRef.current as any)._map !== map) {
+      if (accuracyCircleRef.current) {
+        try { map.removeLayer(accuracyCircleRef.current); } catch (_) {}
+      }
       accuracyCircleRef.current = L.circle([userPosition.lat, userPosition.lng], {
         radius: Math.min(accuracy, 100),
         color: '#38bdf8',
@@ -432,7 +460,7 @@ export const TrailMap: React.FC<TrailMapProps> = ({
       />
 
       {/* Commandes rapides Carte (Cockpit & Repère) */}
-      <div className="absolute top-20 right-4 z-[900] flex flex-col items-end gap-2">
+      <div className="absolute top-28 right-4 z-[900] flex flex-col items-end gap-2">
         {/* Bouton Waze : Bascule Cockpit Ultra-Proche (18.5) / Vue Large */}
         <button
           onClick={() => {
