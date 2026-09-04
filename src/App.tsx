@@ -260,6 +260,10 @@ export const App: React.FC = () => {
         }}
         isClickToMoveMode={isClickToMoveMode}
         onToggleClickToMove={() => setIsClickToMoveMode(!isClickToMoveMode)}
+        onSetUserLocation={(lat, lng, label) => {
+          setManualPosition(lat, lng, label);
+          setIsFollowing(true);
+        }}
       />
 
       {/* 2. Boutons d'accès rapide flottants sur la carte */}

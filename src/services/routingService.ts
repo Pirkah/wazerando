@@ -87,23 +87,34 @@ export async function calculatePedestrianRoute(
           });
         });
 
-        // Extraire les étapes / indications de direction Waze
+        // Extraire les étapes avec les VRAIS noms de rues (Style Waze)
         const steps: { instruction: string; distance: number; bearing: number }[] = [];
         if (route.legs && route.legs[0] && route.legs[0].steps) {
           route.legs[0].steps.forEach((s: any) => {
             if (s.maneuver) {
               const type = s.maneuver.type;
               const modifier = s.maneuver.modifier || '';
-              let instr = 'Continuer sur le sentier';
+              const streetName = s.name ? ` sur ${s.name}` : '';
+              let instr = s.name ? `Continuer sur ${s.name}` : 'Continuer sur le chemin';
+
               if (type === 'turn') {
-                instr = modifier.includes('right')
-                  ? 'Tourner à droite sur le sentier'
-                  : 'Tourner à gauche sur le sentier';
+                if (modifier.includes('slight right')) {
+                  instr = `Légèrement à droite${streetName || ' sur le chemin'}`;
+                } else if (modifier.includes('slight left')) {
+                  instr = `Légèrement à gauche${streetName || ' sur le chemin'}`;
+                } else if (modifier.includes('right')) {
+                  instr = `Tourner à droite${streetName || ' sur le chemin'}`;
+                } else if (modifier.includes('left')) {
+                  instr = `Tourner à gauche${streetName || ' sur le chemin'}`;
+                }
+              } else if (type === 'new name') {
+                instr = `Rejoindre ${s.name || 'le sentier'}`;
               } else if (type === 'fork') {
-                instr = 'Prendre l\'embranchement';
+                instr = `Prendre l'embranchement${streetName}`;
               } else if (type === 'arrive') {
-                instr = `Arrivée à : ${destTitle}`;
+                instr = `Arrivée à destination : ${destTitle}`;
               }
+
               steps.push({
                 instruction: instr,
                 distance: Math.round(s.distance),

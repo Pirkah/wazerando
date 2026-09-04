@@ -83,13 +83,13 @@ export const TrailMap: React.FC<TrailMapProps> = ({
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
-    // Centrage initial sur l'utilisateur (Limoges)
-    const initialLat = userPosition?.lat || 45.8336;
-    const initialLng = userPosition?.lng || 1.2611;
+    // Centrage initial au niveau de la rue (zoom 17 comme en voiture / Waze)
+    const initialLat = userPosition?.lat || 45.8285;
+    const initialLng = userPosition?.lng || 1.2672;
 
     const map = L.map(mapContainerRef.current, {
       center: [initialLat, initialLng],
-      zoom: 14,
+      zoom: 17,
       zoomControl: false,
     });
 
@@ -194,6 +194,11 @@ export const TrailMap: React.FC<TrailMapProps> = ({
         iconAnchor: [14, 14],
       });
       L.marker(latLngs[latLngs.length - 1], { icon: endIcon }).addTo(startEndMarkersRef.current!);
+
+      // Zoom immersif niveau rue comme en voiture (Waze)
+      if (latLngs.length > 0) {
+        map.setView(latLngs[0], 17, { animate: true });
+      }
     }
   }, [trail, activeRoute]);
 
@@ -209,7 +214,7 @@ export const TrailMap: React.FC<TrailMapProps> = ({
       const latLngs = activeRoute.points.map((p) => [p.lat, p.lng] as [number, number]);
 
       routeOutlineRef.current = L.polyline(latLngs, {
-        color: '#1e3a8a',
+        color: '#0f172a',
         weight: 10,
         opacity: 0.8,
         lineCap: 'round',
@@ -217,14 +222,15 @@ export const TrailMap: React.FC<TrailMapProps> = ({
       }).addTo(map);
 
       routePolylineRef.current = L.polyline(latLngs, {
-        color: '#38bdf8',
+        color: '#0284c7',
         weight: 6,
         opacity: 1,
         lineCap: 'round',
         lineJoin: 'round',
       }).addTo(map);
 
-      map.fitBounds(routePolylineRef.current.getBounds(), { padding: [80, 80] });
+      // Vue rapprochée Waze sur le point de départ de navigation
+      map.setView(latLngs[0], 17.5, { animate: true });
     }
   }, [activeRoute]);
 
@@ -327,7 +333,9 @@ export const TrailMap: React.FC<TrailMapProps> = ({
     }
 
     if (isFollowing) {
-      map.panTo([userPosition.lat, userPosition.lng], { animate: true, duration: 0.5 });
+      const currentZoom = map.getZoom();
+      const targetZoom = Math.max(currentZoom, 17);
+      map.setView([userPosition.lat, userPosition.lng], targetZoom, { animate: true });
     }
   }, [userPosition, isFollowing]);
 
@@ -387,7 +395,7 @@ export const TrailMap: React.FC<TrailMapProps> = ({
           onClick={() => {
             onSetIsFollowing(true);
             if (mapInstanceRef.current && userPosition) {
-              mapInstanceRef.current.setView([userPosition.lat, userPosition.lng], 15, { animate: true });
+              mapInstanceRef.current.setView([userPosition.lat, userPosition.lng], 17.5, { animate: true });
             }
           }}
           className="absolute bottom-28 right-4 z-[900] flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-slate-900/90 backdrop-blur-xl border border-sky-500/60 text-sky-400 text-xs font-bold shadow-float animate-bounce"

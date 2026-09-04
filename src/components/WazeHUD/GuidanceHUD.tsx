@@ -17,6 +17,7 @@ interface GuidanceHUDProps {
   onRecenter: () => void;
   isClickToMoveMode: boolean;
   onToggleClickToMove: () => void;
+  onSetUserLocation?: (lat: number, lng: number, label: string) => void;
 }
 
 export const GuidanceHUD: React.FC<GuidanceHUDProps> = ({
@@ -31,6 +32,7 @@ export const GuidanceHUD: React.FC<GuidanceHUDProps> = ({
   onRecenter,
   isClickToMoveMode,
   onToggleClickToMove,
+  onSetUserLocation,
 }) => {
   // 1. Mode Navigation active
   if (activeRoute) {
@@ -103,6 +105,7 @@ export const GuidanceHUD: React.FC<GuidanceHUDProps> = ({
         userLocation={userPosition}
         onNavigateToSpot={onNavigateToSpot}
         onSelectSpot={onSelectSpot}
+        onSetUserLocation={onSetUserLocation}
       />
 
       {/* Barre d'état & Actions GPS Waze */}

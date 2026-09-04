@@ -49,15 +49,70 @@ function generateTrailPoints(
   return points;
 }
 
-// 1. Parcours Bords de Vienne - Limoges
-const limogesPoints = generateTrailPoints(
-  45.8280, 1.2670, // Pont Saint-Étienne
-  45.8450, 1.2580, // Vers Parc de l'Auzette & Uzurat
-  225,
-  295,
-  50,
-  0.004
-);
+// 1. Parcours Réel Bords de Vienne & Centre Historique (Limoges) - Calé sur les vraies rues
+const realLimogesStreetCoords: [number, number, number][] = [
+  [45.8285, 1.2672, 235], // Pont Saint-Étienne
+  [45.8288, 1.2668, 238], // Rue du Pont Saint-Étienne
+  [45.8293, 1.2662, 245], // Jardins de l'Évêché
+  [45.8299, 1.2670, 240], // Rue de la Règle
+  [45.8305, 1.2678, 235], // Quai Louis Goujaud
+  [45.8318, 1.2686, 232], // Port du Naveix
+  [45.8335, 1.2679, 230], // Promenade des Berges
+  [45.8350, 1.2665, 230], // Pont Neuf
+  [45.8362, 1.2645, 228], // Passerelle des Casseaux
+  [45.8355, 1.2615, 230], // Quai rive gauche
+  [45.8330, 1.2585, 232], // Promenade du Port Saint-Martial
+  [45.8290, 1.2560, 235], // Pont Saint-Martial
+  [45.8275, 1.2590, 240], // Rue du Maupas
+  [45.8280, 1.2640, 238], // Allée des Bénédictins
+  [45.8285, 1.2672, 235], // Boucle refermée sur Pont Saint-Étienne
+];
+
+function generateStreetPoints(waypoints: [number, number, number][]): ElevationPoint[] {
+  const pts: ElevationPoint[] = [];
+  let currentDistance = 0;
+
+  for (let i = 0; i < waypoints.length; i++) {
+    const [lat, lng, ele] = waypoints[i];
+    if (i > 0) {
+      const prev = pts[pts.length - 1];
+      const dLat = (lat - prev.lat) * 111320;
+      const dLng = (lng - prev.lng) * 40075000 * Math.cos(((lat + prev.lat) / 2) * (Math.PI / 180)) / 360;
+      const dist = Math.sqrt(dLat * dLat + dLng * dLng);
+
+      // Subdiviser les segments de rue tous les 20 mètres pour une marche fluide
+      const subSteps = Math.max(1, Math.round(dist / 20));
+      for (let s = 1; s <= subSteps; s++) {
+        const ratio = s / subSteps;
+        const subLat = prev.lat + (lat - prev.lat) * ratio;
+        const subLng = prev.lng + (lng - prev.lng) * ratio;
+        const subEle = Math.round(prev.elevation + (ele - prev.elevation) * ratio);
+        const subDist = (dist / subSteps);
+        currentDistance += subDist;
+
+        pts.push({
+          lat: subLat,
+          lng: subLng,
+          elevation: subEle,
+          distanceFromStart: Math.round(currentDistance),
+          slopePercentage: Math.round(((ele - prev.elevation) / dist) * 100),
+        });
+      }
+    } else {
+      pts.push({
+        lat,
+        lng,
+        elevation: ele,
+        distanceFromStart: 0,
+        slopePercentage: 0,
+      });
+    }
+  }
+
+  return pts;
+}
+
+const limogesPoints = generateStreetPoints(realLimogesStreetCoords);
 
 // 2. Forêt des Vaseix - Limoges Ouest
 const vaseixPoints = generateTrailPoints(
