@@ -1,0 +1,406 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { Trail, CommunitySpot, MapTileLayer, SpotCategory, ElevationPoint } from './types';
+import { MOCK_TRAILS, INITIAL_COMMUNITY_SPOTS } from './data/mockTrails';
+import { useGeolocation } from './hooks/useGeolocation';
+import { calculatePedestrianRoute, NavigationRoute } from './services/routingService';
+import { TrailMap } from './components/Map/TrailMap';
+import { ElevationProfile } from './components/Elevation/ElevationProfile';
+import { GuidanceHUD } from './components/WazeHUD/GuidanceHUD';
+import { WazeSpeedometer } from './components/WazeHUD/WazeSpeedometer';
+import { ReportModal } from './components/Modals/ReportModal';
+import { SpotDetailsModal } from './components/Modals/SpotDetailsModal';
+import { TrailSelector } from './components/Sidebar/TrailSelector';
+import { Menu, PlusCircle, LocateFixed } from 'lucide-react';
+
+export const App: React.FC = () => {
+  // 1. Sentiers disponibles & Sélection
+  const [trails, setTrails] = useState<Trail[]>(() => {
+    const saved = localStorage.getItem('wazerando_custom_trails');
+    if (saved) {
+      try {
+        const custom = JSON.parse(saved);
+        return [...MOCK_TRAILS, ...custom];
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return MOCK_TRAILS;
+  });
+
+  const [selectedTrailId, setSelectedTrailId] = useState<string>(MOCK_TRAILS[0].id);
+  const activeTrail = useMemo(() => {
+    return trails.find((t) => t.id === selectedTrailId) || trails[0];
+  }, [trails, selectedTrailId]);
+
+  // 2. Vraie Géolocalisation GPS
+  const {
+    location: gpsLocation,
+    isLiveGps,
+    error: gpsError,
+    isFollowing,
+    setIsFollowing,
+    startTracking,
+  } = useGeolocation(activeTrail.points[0]);
+
+  const userPosition = useMemo(() => {
+    if (gpsLocation) {
+      return {
+        lat: gpsLocation.lat,
+        lng: gpsLocation.lng,
+        heading: gpsLocation.heading || 0,
+        altitude: gpsLocation.altitude || 1400,
+        speed: gpsLocation.speed,
+        accuracy: gpsLocation.accuracy,
+      };
+    }
+    return {
+      lat: activeTrail.points[0]?.lat || 45.955,
+      lng: activeTrail.points[0]?.lng || 6.885,
+      heading: 0,
+      altitude: 1410,
+      speed: 0,
+      accuracy: 15,
+    };
+  }, [gpsLocation, activeTrail]);
+
+  // 3. Spots communautaires Waze
+  const [spots, setSpots] = useState<CommunitySpot[]>(() => {
+    const saved = localStorage.getItem('wazerando_spots');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return INITIAL_COMMUNITY_SPOTS;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('wazerando_spots', JSON.stringify(spots));
+  }, [spots]);
+
+  // 4. Fond de carte & Filtres
+  const [activeLayer, setActiveLayer] = useState<MapTileLayer>('outdoors');
+  const [selectedCategories, setSelectedCategories] = useState<SpotCategory[]>([
+    'viewpoint',
+    'hazard',
+    'water',
+    'bivouac',
+    'picnic',
+    'fauna',
+    'shelter',
+  ]);
+
+  const filteredSpots = useMemo(() => {
+    return spots.filter((s) => selectedCategories.includes(s.category));
+  }, [spots, selectedCategories]);
+
+  // 5. Navigation & Calcul d'Itinéraire Waze
+  const [activeRoute, setActiveRoute] = useState<NavigationRoute | null>(null);
+  const [isRoutingLoading, setIsRoutingLoading] = useState<boolean>(false);
+
+  const handleStartNavigationToSpot = async (spot: CommunitySpot) => {
+    if (!userPosition) return;
+    setIsRoutingLoading(true);
+    try {
+      const route = await calculatePedestrianRoute(
+        userPosition.lat,
+        userPosition.lng,
+        spot.lat,
+        spot.lng,
+        spot.title,
+        userPosition.altitude || 1400,
+        spot.elevation
+      );
+      setActiveRoute(route);
+      setIsFollowing(true); // Active automatiquement la caméra Waze
+    } catch (err) {
+      console.error('Erreur de calcul d\'itinéraire:', err);
+    } finally {
+      setIsRoutingLoading(false);
+    }
+  };
+
+  const handleStopNavigation = () => {
+    setActiveRoute(null);
+  };
+
+  // 6. Profil Altimétrique Actif (Itinéraire en cours ou Sentier)
+  const activeElevationTrail: Trail = useMemo(() => {
+    if (activeRoute && activeRoute.points.length > 0) {
+      return {
+        id: 'active-nav-route',
+        name: `Itinéraire vers ${activeRoute.destinationTitle}`,
+        region: 'Navigation en direct',
+        difficulty: 'moyen',
+        totalDistance: activeRoute.distance,
+        elevationGain: activeRoute.elevationGain,
+        elevationLoss: activeRoute.elevationLoss,
+        maxElevation: activeRoute.maxElevation,
+        minElevation: activeRoute.minElevation,
+        estimatedDuration: Math.round(activeRoute.duration / 60),
+        points: activeRoute.points,
+        initialCenter: [userPosition.lat, userPosition.lng],
+        initialZoom: 15,
+        description: 'Calcul d\'itinéraire Waze',
+      };
+    }
+    return activeTrail;
+  }, [activeRoute, activeTrail, userPosition]);
+
+  // Point survolé sur le profil altimétrique
+  const [hoveredPoint, setHoveredPoint] = useState<ElevationPoint | null>(null);
+
+  // 7. Modales
+  const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
+  const [selectedSpot, setSelectedSpot] = useState<CommunitySpot | null>(null);
+  const [isReportModalOpen, setIsReportModalOpen] = useState<boolean>(false);
+  const [isReportingMode, setIsReportingMode] = useState<boolean>(false);
+  const [clickedCoords, setClickedCoords] = useState<{ lat: number; lng: number } | null>(null);
+
+  // Actions spots
+  const handleVote = (spotId: string, direction: 'up' | 'down') => {
+    setSpots((prev) =>
+      prev.map((s) => {
+        if (s.id !== spotId) return s;
+        if (s.userVoted === direction) {
+          return {
+            ...s,
+            upvotes: direction === 'up' ? s.upvotes - 1 : s.upvotes,
+            downvotes: direction === 'down' ? s.downvotes - 1 : s.downvotes,
+            userVoted: undefined,
+          };
+        }
+        const upDiff = direction === 'up' ? 1 : s.userVoted === 'up' ? -1 : 0;
+        const downDiff = direction === 'down' ? 1 : s.userVoted === 'down' ? -1 : 0;
+        return {
+          ...s,
+          upvotes: Math.max(0, s.upvotes + upDiff),
+          downvotes: Math.max(0, s.downvotes + downDiff),
+          userVoted: direction,
+        };
+      })
+    );
+  };
+
+  const handleVerify = (spotId: string) => {
+    setSpots((prev) =>
+      prev.map((s) =>
+        s.id === spotId
+          ? { ...s, verifiedCount: s.verifiedCount + 1, lastVerifiedAt: 'À l\'instant' }
+          : s
+      )
+    );
+  };
+
+  const handleAddComment = (spotId: string, text: string) => {
+    const newComm = {
+      id: `comm-${Date.now()}`,
+      author: 'Vous',
+      text,
+      createdAt: 'À l\'instant',
+    };
+    setSpots((prev) =>
+      prev.map((s) =>
+        s.id === spotId ? { ...s, comments: [...(s.comments || []), newComm] } : s
+      )
+    );
+  };
+
+  const handleCreateReport = (
+    newSpotData: Omit<CommunitySpot, 'id' | 'createdAt' | 'upvotes' | 'downvotes' | 'verifiedCount'>
+  ) => {
+    const newSpot: CommunitySpot = {
+      ...newSpotData,
+      id: `spot-${Date.now()}`,
+      trailId: activeTrail.id,
+      createdAt: 'À l\'instant',
+      upvotes: 1,
+      downvotes: 0,
+      verifiedCount: 1,
+      lastVerifiedAt: 'À l\'instant',
+    };
+
+    setSpots((prev) => [newSpot, ...prev]);
+    setIsReportingMode(false);
+    setClickedCoords(null);
+  };
+
+  const handleImportGpx = (newTrail: Trail) => {
+    setTrails((prev) => {
+      const updated = [newTrail, ...prev];
+      const customOnly = updated.filter(
+        (t) => !MOCK_TRAILS.some((m) => m.id === t.id)
+      );
+      localStorage.setItem('wazerando_custom_trails', JSON.stringify(customOnly));
+      return updated;
+    });
+    setSelectedTrailId(newTrail.id);
+    setActiveRoute(null);
+  };
+
+  const handleToggleCategory = (cat: SpotCategory) => {
+    setSelectedCategories((prev) =>
+      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
+    );
+  };
+
+  const handleMapClick = (lat: number, lng: number) => {
+    if (isReportingMode) {
+      setClickedCoords({ lat, lng });
+      setIsReportModalOpen(true);
+      setIsReportingMode(false);
+    }
+  };
+
+  return (
+    <div className="relative w-screen h-screen overflow-hidden flex flex-col bg-slate-950">
+      {/* 1. Guidage Waze HUD (Bandeau de navigation ou Recherche "Où aller ?") */}
+      <GuidanceHUD
+        userPosition={userPosition}
+        spots={filteredSpots}
+        activeRoute={activeRoute}
+        onStopNavigation={handleStopNavigation}
+        onNavigateToSpot={handleStartNavigationToSpot}
+        onSelectSpot={(spot) => setSelectedSpot(spot)}
+        isLiveGps={isLiveGps}
+        gpsError={gpsError}
+        onEnableGps={startTracking}
+      />
+
+      {/* 2. Boutons d'accès rapide flottants sur la carte */}
+      <div className="absolute top-4 left-4 z-[960] flex flex-col gap-2">
+        <button
+          onClick={() => setIsMenuOpen(true)}
+          className="w-11 h-11 rounded-2xl bg-slate-900/90 hover:bg-slate-800 text-white flex items-center justify-center shadow-hud border border-slate-700/80 transition-transform active:scale-95"
+          title="Menu et randonnées"
+        >
+          <Menu className="w-5 h-5 text-emerald-400" />
+        </button>
+      </div>
+
+      <div className="absolute top-4 right-4 z-[960] flex flex-col gap-2">
+        <button
+          onClick={() => {
+            setIsFollowing(true);
+            startTracking();
+          }}
+          className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-hud border transition-all active:scale-95 ${
+            isFollowing && isLiveGps
+              ? 'bg-sky-500 border-sky-300 text-white'
+              : 'bg-slate-900/90 hover:bg-slate-800 text-slate-300 border-slate-700/80'
+          }`}
+          title="Centrer sur ma position GPS réelle"
+        >
+          <LocateFixed className="w-5 h-5" />
+        </button>
+      </div>
+
+      {/* 3. Carte Interactive Principale */}
+      <div className="flex-1 min-h-0 w-full h-full relative">
+        <TrailMap
+          trail={activeTrail}
+          spots={filteredSpots}
+          activeLayer={activeLayer}
+          userPosition={userPosition}
+          hoveredPoint={hoveredPoint}
+          activeRoute={activeRoute}
+          isFollowing={isFollowing}
+          onSetIsFollowing={setIsFollowing}
+          onSelectSpot={(spot) => setSelectedSpot(spot)}
+          onMapClick={handleMapClick}
+          isReportingMode={isReportingMode}
+        />
+
+        {/* Compteur Waze (Vitesse km/h + Altitude m) */}
+        <WazeSpeedometer
+          speed={userPosition?.speed ?? null}
+          altitude={userPosition?.altitude ?? null}
+          heading={userPosition?.heading ?? null}
+          accuracy={userPosition?.accuracy}
+        />
+
+        {/* Bouton Waze Flottant : SIGNALER */}
+        <div className="absolute bottom-24 right-4 z-[900] flex flex-col items-end gap-2.5">
+          {isReportingMode ? (
+            <button
+              onClick={() => setIsReportingMode(false)}
+              className="px-4 py-2.5 rounded-full bg-slate-900 text-white border border-slate-700 text-xs font-bold shadow-xl"
+            >
+              Annuler le pointage
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                setClickedCoords(null);
+                setIsReportModalOpen(true);
+              }}
+              className="flex items-center gap-2.5 px-5 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-slate-950 font-black text-sm shadow-float border-2 border-white/60 transition-transform active:scale-95"
+              title="Signaler un spot ou une alerte sur le sentier"
+            >
+              <PlusCircle className="w-5 h-5 stroke-[2.5]" />
+              <span>SIGNALER</span>
+            </button>
+          )}
+        </div>
+
+        {/* Indicateur de calcul d'itinéraire */}
+        {isRoutingLoading && (
+          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[1000] bg-slate-900/90 backdrop-blur px-4 py-2 rounded-full border border-sky-400 text-xs font-bold text-sky-300 shadow-xl flex items-center gap-2">
+            <span className="w-3 h-3 rounded-full border-2 border-sky-400 border-t-transparent animate-spin"></span>
+            <span>Calcul du meilleur sentier...</span>
+          </div>
+        )}
+      </div>
+
+      {/* 4. Profil Altimétrique Dynamique & Dénivelé */}
+      <ElevationProfile
+        trail={activeElevationTrail}
+        spots={filteredSpots}
+        hoveredPoint={hoveredPoint}
+        onHoverPoint={setHoveredPoint}
+        onSelectSpot={(spot) => setSelectedSpot(spot)}
+      />
+
+      {/* 5. Modale de Signalement Waze */}
+      <ReportModal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        onSubmit={handleCreateReport}
+        currentPosition={userPosition}
+        clickedPosition={clickedCoords}
+        currentElevation={userPosition?.altitude || 1400}
+      />
+
+      {/* 6. Modale de Détails d'un Spot */}
+      <SpotDetailsModal
+        spot={selectedSpot}
+        onClose={() => setSelectedSpot(null)}
+        onVote={handleVote}
+        onVerify={handleVerify}
+        onAddComment={handleAddComment}
+        userPosition={userPosition}
+      />
+
+      {/* 7. Volet Latéral Sélecteur de Rando & Calques */}
+      <TrailSelector
+        isOpen={isMenuOpen}
+        onClose={() => setIsMenuOpen(false)}
+        trails={trails}
+        selectedTrailId={selectedTrailId}
+        onSelectTrail={(id) => {
+          setSelectedTrailId(id);
+          setActiveRoute(null);
+        }}
+        onImportGpx={handleImportGpx}
+        activeLayer={activeLayer}
+        onChangeLayer={setActiveLayer}
+        selectedCategories={selectedCategories}
+        onToggleCategory={handleToggleCategory}
+      />
+    </div>
+  );
+};
+
+export default App;
