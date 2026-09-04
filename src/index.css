@@ -14,9 +14,11 @@
   font-family: inherit;
 }
 
-.leaflet-div-icon {
+.leaflet-div-icon,
+.user-location-pin {
   background: transparent !important;
   border: none !important;
+  pointer-events: auto !important;
 }
 
 .leaflet-control-zoom {

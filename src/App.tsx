@@ -47,6 +47,7 @@ export const App: React.FC = () => {
   } = useGeolocation();
 
   const [isClickToMoveMode, setIsClickToMoveMode] = useState<boolean>(false);
+  const [recenterCount, setRecenterCount] = useState<number>(0);
 
   // 3. Spots communautaires Waze
   const [spots, setSpots] = useState<CommunitySpot[]>(() => {
@@ -304,6 +305,7 @@ export const App: React.FC = () => {
         onToggleSimulation={toggleSimulation}
         onRecenter={() => {
           setIsFollowing(true);
+          setRecenterCount((c) => c + 1);
           startGpsTracking();
         }}
         isClickToMoveMode={isClickToMoveMode}
@@ -311,6 +313,7 @@ export const App: React.FC = () => {
         onSetUserLocation={(lat, lng, label) => {
           setManualPosition(lat, lng, label);
           setIsFollowing(true);
+          setRecenterCount((c) => c + 1);
         }}
       />
 
@@ -347,6 +350,7 @@ export const App: React.FC = () => {
         <button
           onClick={() => {
             setIsFollowing(true);
+            setRecenterCount((c) => c + 1);
             startGpsTracking();
           }}
           className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-hud border transition-all active:scale-95 ${
@@ -376,6 +380,7 @@ export const App: React.FC = () => {
           onSelectSpot={(spot) => setSelectedSpot(spot)}
           onMapClick={handleMapClick}
           isReportingMode={isReportingMode}
+          recenterTrigger={recenterCount}
         />
 
         {/* Compteur Waze (Vitesse km/h + Altitude m) */}

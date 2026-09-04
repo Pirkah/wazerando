@@ -12,8 +12,8 @@ export interface UserLocation {
   label: string;
 }
 
-// Coordonnées par défaut : Limoges (Bords de Vienne / Centre)
-const LIMOGES_COORDS = { lat: 45.8285, lng: 1.2640, altitude: 245, label: 'Limoges (Bords de Vienne)' };
+// Coordonnées par défaut : Limoges (Pont Saint-Étienne - Départ Sentier)
+const LIMOGES_COORDS = { lat: 45.8285, lng: 1.2672, altitude: 235, label: 'Limoges (Pont Saint-Étienne)' };
 
 export function useGeolocation() {
   const [location, setLocation] = useState<UserLocation>({
@@ -25,7 +25,7 @@ export function useGeolocation() {
     heading: 0,
     timestamp: Date.now(),
     source: 'ip',
-    label: 'Limoges',
+    label: 'Limoges (Pont Saint-Étienne)',
   });
 
   const [isFollowing, setIsFollowing] = useState<boolean>(true); // Suivi caméra Waze
@@ -48,14 +48,24 @@ export function useGeolocation() {
           const lng = parseFloat(data.longitude);
           const city = data.city || 'Limoges';
 
+          // Si l'IP détectée est dans le secteur de Limoges / Agglo (Limoges, Panazol, Couzeix, etc.)
+          // On place l'utilisateur au départ officiel du sentier Pont Saint-Étienne
+          const isLimogesArea =
+            city.toLowerCase().includes('limoges') ||
+            city.toLowerCase().includes('panazol') ||
+            (Math.abs(lat - 45.83) < 0.15 && Math.abs(lng - 1.26) < 0.15);
+
+          const finalLat = isLimogesArea ? LIMOGES_COORDS.lat : lat;
+          const finalLng = isLimogesArea ? LIMOGES_COORDS.lng : lng;
+
           setLocation((prev) => {
             if (prev.source === 'gps') return prev; // Ne pas écraser un vrai GPS actif
             const updated: UserLocation = {
               ...prev,
-              lat,
-              lng,
+              lat: finalLat,
+              lng: finalLng,
               source: 'ip',
-              label: `${city} (Détecté)`,
+              label: isLimogesArea ? 'Limoges (Pont Saint-Étienne)' : `${city} (Détecté)`,
             };
             lastLocationRef.current = updated;
             return updated;

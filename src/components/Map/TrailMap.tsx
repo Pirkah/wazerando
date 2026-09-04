@@ -18,6 +18,7 @@ interface TrailMapProps {
   onSelectSpot: (spot: CommunitySpot) => void;
   onMapClick?: (lat: number, lng: number) => void;
   isReportingMode?: boolean;
+  recenterTrigger?: number;
 }
 
 // 100% Tuiles Gratuites et Publiques - Aucune clé API requise
@@ -79,6 +80,7 @@ export const TrailMap: React.FC<TrailMapProps> = ({
   onSelectSpot,
   onMapClick,
   isReportingMode,
+  recenterTrigger,
 }) => {
   const [isCockpitMode, setIsCockpitMode] = React.useState<boolean>(true);
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -216,12 +218,18 @@ export const TrailMap: React.FC<TrailMapProps> = ({
       });
       L.marker(latLngs[latLngs.length - 1], { icon: endIcon }).addTo(startEndMarkersRef.current!);
 
-      // Zoom immersif niveau rue comme en voiture (Waze)
-      if (latLngs.length > 0) {
+      // Si le suivi est actif, la caméra reste centrée sur l'utilisateur en mode cockpit Waze
+      if (userPosition && isFollowing) {
+        if (isCockpitMode) {
+          centerCockpitWaze(map, userPosition.lat, userPosition.lng, 18.5);
+        } else {
+          map.setView([userPosition.lat, userPosition.lng], 17, { animate: true });
+        }
+      } else if (latLngs.length > 0) {
         map.setView(latLngs[0], 17, { animate: true });
       }
     }
-  }, [trail, activeRoute]);
+  }, [trail, activeRoute, userPosition, isFollowing, isCockpitMode]);
 
   // 5. Affichage de l'itinéraire de navigation calculé (Navigation Waze)
   useEffect(() => {
@@ -318,14 +326,14 @@ export const TrailMap: React.FC<TrailMapProps> = ({
     const userIcon = L.divIcon({
       className: 'user-location-pin',
       html: userHtml,
-      iconSize: [80, 80],
-      iconAnchor: [40, 40],
+      iconSize: [90, 90],
+      iconAnchor: [45, 45],
     });
 
     if (!userMarkerRef.current) {
       userMarkerRef.current = L.marker([userPosition.lat, userPosition.lng], {
         icon: userIcon,
-        zIndexOffset: 2000,
+        zIndexOffset: 3000,
       }).addTo(map);
 
       userMarkerRef.current.on('click', (e: L.LeafletMouseEvent) => {
@@ -361,6 +369,17 @@ export const TrailMap: React.FC<TrailMapProps> = ({
       }
     }
   }, [userPosition, isFollowing, isCockpitMode, userAvatar, onOpenAvatarSelector]);
+
+  // Réaction immédiate et garantie au clic sur le bouton Recentrer
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !userPosition || recenterTrigger === undefined) return;
+    if (isCockpitMode) {
+      centerCockpitWaze(map, userPosition.lat, userPosition.lng, 18.5);
+    } else {
+      map.setView([userPosition.lat, userPosition.lng], 17, { animate: true });
+    }
+  }, [recenterTrigger, isCockpitMode]);
 
   // 8. Point survolé sur le profil altimétrique
   useEffect(() => {
